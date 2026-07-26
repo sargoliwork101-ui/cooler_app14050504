@@ -11,7 +11,9 @@ dependencies:
   flutter:
     sdk: flutter
   webview_flutter: ^4.10.0
-  file_picker: ^8.1.7
+  # نسخه‌های قدیمی file_picker با Flutter/Android جدید روی GitHub Actions
+  # با compileSdk 34 ساخته می‌شوند و خطای API 36 می‌دهند.
+  file_picker: ^10.3.3
 
 flutter:
   uses-material-design: true
