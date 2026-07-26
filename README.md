@@ -129,4 +129,4 @@ android/app/src/main/AndroidManifest.xml
 - HTML/CSS/JS و `webpage.h` از ESP32 حذف شد.
 - endpointهای قدیمی حفظ شدند و خروجی آن‌ها JSON شد.
 - منطق سناریو، NTP، محافظت کمپرسور، LittleFS، Round-Robin، Watchdog، AES و AP/STA باقی ماند.
-- UI Flutter شامل هیرو با کولر/فن متحرک، ساعت، اینترنت، سلامت موتور، سناریوها، تنظیمات AP/STA/AP Cycle/Protection و ناوبری پایین مشابه پنل اصلی است.
+- UI Flutter با پالت رنگ، خط‌های کم‌رنگ، سایه‌ها و فونت Vazirmatn نزدیک‌تر به پنل اصلی تنظیم شد. پشتیبان‌گیری/بازیابی سناریوها هم از فایل JSON داخل گوشی انجام می‌شود، نه کلیپ‌بورد.

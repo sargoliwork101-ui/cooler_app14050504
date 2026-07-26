@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
@@ -23,8 +26,9 @@ class SmartCoolerApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
-        fontFamily: 'sans',
+        textTheme: GoogleFonts.vazirmatnTextTheme(ThemeData.dark().textTheme),
         scaffoldBackgroundColor: AppColors.bg,
+        dividerColor: AppColors.line,
         colorScheme: const ColorScheme.dark(
           primary: AppColors.accent,
           secondary: AppColors.cyan,
@@ -44,8 +48,9 @@ class AppColors {
   static const bg = Color(0xFF0A0C0D);
   static const panel = Color(0xFF1B1F21);
   static const panel2 = Color(0xFF15181A);
-  static const line = Color(0x14FFFFFF);
-  static const lineStrong = Color(0x24FFFFFF);
+  // دقیقاً نزدیک به CSS پنل وب: خط‌ها باید خیلی کم‌رنگ باشند، نه کادر سفید ضخیم.
+  static const line = Color(0x0FFFFFFF);
+  static const lineStrong = Color(0x18FFFFFF);
   static const accent = Color(0xFF1DE9C4);
   static const accentDim = Color(0x291DE9C4);
   static const onAccent = Color(0xFF00201B);
@@ -701,13 +706,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         const BannerBox(text: 'تا زمانی که دکمهٔ «ذخیره و پیاده‌سازی برنامه‌ها» را نزنید، سناریوها اجرا نمی‌شوند.'),
         Row(
           children: [
-            Expanded(child: WideButton(label: '↓ پشتیبان‌گیری سناریوها', foreground: AppColors.accent, background: AppColors.accentDim, onPressed: exportScenariosToClipboard)),
+            Expanded(child: WideButton(label: '↓ پشتیبان‌گیری سناریوها', foreground: AppColors.accent, background: AppColors.accentDim, onPressed: exportScenariosToFile)),
             const SizedBox(width: 8),
-            Expanded(child: WideButton(label: '↑ بازیابی از کلیپ‌بورد', foreground: AppColors.onCyan, background: AppColors.cyan, onPressed: importScenariosFromClipboard)),
+            Expanded(child: WideButton(label: '↑ بازیابی از فایل', foreground: AppColors.onCyan, background: AppColors.cyan, onPressed: importScenariosFromFile)),
           ],
         ),
         const SizedBox(height: 8),
-        const Text('در این نسخه موبایل، فایل پشتیبان به‌صورت JSON در کلیپ‌بورد کپی/خوانده می‌شود.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.faint, fontSize: 11)),
+        const Text('فایل پشتیبان با فرمت JSON از حافظه گوشی انتخاب یا در گوشی ذخیره می‌شود؛ کلیپ‌بورد استفاده نمی‌شود.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.faint, fontSize: 11)),
         const SizedBox(height: 14),
         NeuPanel(
           child: Column(
@@ -743,29 +748,50 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  Future<void> exportScenariosToClipboard() async {
+  Future<void> exportScenariosToFile() async {
+    final now = DateTime.now();
+    final stamp = '${now.year}-${pad2(now.month)}-${pad2(now.day)}';
     final backup = {
       'version': 1,
       'type': 'esp32-cooler-scenarios',
-      'exportedAt': DateTime.now().toIso8601String(),
+      'exportedAt': now.toIso8601String(),
       'scenarios': scenarios.map((s) => s.toJson()).toList(),
     };
-    await Clipboard.setData(ClipboardData(text: const JsonEncoder.withIndent('  ').convert(backup)));
-    toast('JSON پشتیبان سناریوها در کلیپ‌بورد کپی شد.');
+    final jsonText = const JsonEncoder.withIndent('  ').convert(backup);
+    try {
+      final savedPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'ذخیره فایل پشتیبان سناریوها',
+        fileName: 'cooler-scenarios-$stamp.json',
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        bytes: Uint8List.fromList(utf8.encode(jsonText)),
+      );
+      if (savedPath == null) return;
+      toast('فایل پشتیبان سناریوها در گوشی ذخیره شد.');
+    } catch (e) {
+      toast('خطا در ذخیره فایل پشتیبان: $e', bad: true);
+    }
   }
 
-  Future<void> importScenariosFromClipboard() async {
+  Future<void> importScenariosFromFile() async {
     try {
-      final data = await Clipboard.getData('text/plain');
-      final parsed = jsonDecode(data?.text ?? '');
+      final result = await FilePicker.platform.pickFiles(
+        dialogTitle: 'انتخاب فایل پشتیبان سناریوها',
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final bytes = result.files.single.bytes;
+      if (bytes == null) throw Exception('فایل خوانده نشد');
+      final parsed = jsonDecode(utf8.decode(bytes));
       final list = parsed is List ? parsed : parsed['scenarios'];
       if (list is! List || list.length > 20) throw Exception('فرمت نامعتبر');
-      setState(() {
-        scenarios = list.map((e) => ScenarioModel.fromJson(Map<String, dynamic>.from(e as Map))).toList();
-      });
-      toast('سناریوها از کلیپ‌بورد خوانده شدند. برای اعمال، ذخیره را بزنید.');
+      final imported = list.map((e) => ScenarioModel.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      setState(() => scenarios = imported);
+      toast('سناریوها از فایل خوانده شدند. برای اعمال روی برد، ذخیره را بزنید.');
     } catch (_) {
-      toast('محتوای کلیپ‌بورد پشتیبان معتبر نیست.', bad: true);
+      toast('فایل پشتیبان معتبر نیست یا با این برنامه سازگار نیست.', bad: true);
     }
   }
 
@@ -815,6 +841,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               const Text('قدرت سیگنال‌دهی', style: TextStyle(color: AppColors.dim, fontSize: 12)),
               const SizedBox(height: 7),
               SegmentedButton<int>(
+                style: ButtonStyle(
+                  side: MaterialStateProperty.all(const BorderSide(color: AppColors.lineStrong, width: 1)),
+                  backgroundColor: MaterialStateProperty.resolveWith((states) => states.contains(MaterialState.selected) ? AppColors.accentDim : AppColors.panel2),
+                  foregroundColor: MaterialStateProperty.resolveWith((states) => states.contains(MaterialState.selected) ? AppColors.accent : AppColors.dim),
+                ),
                 segments: const [
                   ButtonSegment(value: 0, label: Text('کم')),
                   ButtonSegment(value: 1, label: Text('متوسط')),

@@ -21,6 +21,8 @@ Upload this folder as a GitHub repository, then:
 
 The workflow installs Flutter on GitHub's runner, generates the Android project files, allows cleartext HTTP for the ESP32, and builds a release APK.
 
+Scenario backup/restore uses JSON files selected/saved from the phone storage via Android's file picker; it does not use clipboard.
+
 ## Run locally if you install Flutter later
 
 ```bash
