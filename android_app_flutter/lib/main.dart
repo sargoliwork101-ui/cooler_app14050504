@@ -221,18 +221,21 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
     try {
       _showSnack('در حال درخواست اتصال به $ssid ...');
 
-      final connected = await _wifiChannel.invokeMethod<bool>('connect', {
+      final response = await _wifiChannel.invokeMethod<dynamic>('connect', {
         'ssid': ssid,
         'password': password,
       });
+      final status = response?.toString() ?? 'failed';
 
-      if (connected == true) {
-        _showSnack('درخواست اتصال به $ssid ارسال شد. چند ثانیه صبر کنید...');
-        await Future<void>.delayed(const Duration(seconds: 4));
+      if (status == 'requested' || status == 'true') {
+        _showSnack('درخواست اتصال به $ssid ارسال شد. اگر پنجره تأیید اندروید نمایش داده شد، آن را تأیید کنید.');
+        await Future<void>.delayed(const Duration(seconds: 5));
         await _controller.runJavaScript('fetchStatus(); loadSettings();');
+      } else if (status == 'permission_requested') {
+        _showSnack('دسترسی WiFi/Location درخواست شد. بعد از تأیید دسترسی، دوباره دکمه اتصال را بزنید.');
       } else {
         _showSnack(
-          'اتصال خودکار انجام نشد. اگر اندروید درخواست دسترسی/تأیید اتصال نشان داد، تأیید کنید و دوباره تلاش کنید؛ یا دستی به شبکه $ssid وصل شوید.',
+          'اتصال خودکار انجام نشد. اگر اندروید درخواست اتصال نشان داد، تأیید کنید؛ یا دستی به شبکه $ssid وصل شوید.',
           isError: true,
         );
       }

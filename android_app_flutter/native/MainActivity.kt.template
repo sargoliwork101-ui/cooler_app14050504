@@ -27,7 +27,7 @@ class MainActivity: FlutterActivity() {
                 "connect" -> {
                     val ssid = call.argument<String>("ssid") ?: ""
                     val password = call.argument<String>("password") ?: ""
-                    if (ssid.isBlank()) result.success(false) else result.success(connectToWifi(ssid, password))
+                    if (ssid.isBlank()) result.success("failed") else result.success(connectToWifi(ssid, password))
                 }
                 else -> result.notImplemented()
             }
@@ -62,12 +62,12 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun connectToWifi(ssid: String, password: String): Boolean {
-        if (!ensureWifiPermissions()) return false
+    private fun connectToWifi(ssid: String, password: String): String {
+        if (!ensureWifiPermissions()) return "permission_requested"
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) connectAndroidQPlus(ssid, password) else connectLegacy(ssid, password)
     }
 
-    private fun connectAndroidQPlus(ssid: String, password: String): Boolean {
+    private fun connectAndroidQPlus(ssid: String, password: String): String {
         return try {
             val specBuilder = WifiNetworkSpecifier.Builder().setSsid(ssid)
             if (password.isNotEmpty()) specBuilder.setWpa2Passphrase(password)
@@ -85,14 +85,14 @@ class MainActivity: FlutterActivity() {
                 }
             }
             cm.requestNetwork(request, wifiNetworkCallback!!)
-            true
+            "requested"
         } catch (e: Exception) {
-            false
+            "failed"
         }
     }
 
     @Suppress("DEPRECATION")
-    private fun connectLegacy(ssid: String, password: String): Boolean {
+    private fun connectLegacy(ssid: String, password: String): String {
         return try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             if (!wifiManager.isWifiEnabled) wifiManager.isWifiEnabled = true
@@ -100,13 +100,13 @@ class MainActivity: FlutterActivity() {
             config.SSID = "\"$ssid\""
             if (password.isEmpty()) config.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE) else config.preSharedKey = "\"$password\""
             val netId = wifiManager.addNetwork(config)
-            if (netId == -1) return false
+            if (netId == -1) return "failed"
             wifiManager.disconnect()
             wifiManager.enableNetwork(netId, true)
             wifiManager.reconnect()
-            true
+            "requested"
         } catch (e: Exception) {
-            false
+            "failed"
         }
     }
 }
