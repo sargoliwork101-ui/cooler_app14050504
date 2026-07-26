@@ -109,15 +109,17 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
   }
 
   Future<void> _handleWifiAssist(String message) async {
-    if (_wifiDialogOpen || !mounted) return;
-
     String targetSsid = 'ESP32_Timer_Hub';
     String targetPass = '12345678';
+    bool force = false;
+    bool autoApproved = false;
     try {
       final data = jsonDecode(message);
       if (data is Map) {
         targetSsid = (data['ssid']?.toString().trim().isNotEmpty ?? false) ? data['ssid'].toString().trim() : targetSsid;
         targetPass = data['pass']?.toString() ?? targetPass;
+        force = data['force'] == true;
+        autoApproved = data['autoApproved'] == true || data['autoApproved']?.toString() == '1';
       }
     } catch (_) {}
 
@@ -129,10 +131,17 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
     }
 
     if (_sameSsid(currentSsid, targetSsid)) {
-      await _showAlreadyOnBoardWifiDialog(targetSsid);
+      if (force) await _showAlreadyOnBoardWifiDialog(targetSsid);
       return;
     }
 
+    // اگر کاربر قبلاً اجازه اتصال خودکار را داده، دیگر پنجره مزاحم نشان نده؛ خودکار تلاش کن.
+    if (autoApproved && !force) {
+      await _connectToWifi(targetSsid, targetPass, silent: true);
+      return;
+    }
+
+    if (_wifiDialogOpen || !mounted) return;
     await _showConnectWifiDialog(targetSsid, targetPass, currentSsid);
   }
 
@@ -169,15 +178,15 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
         textDirection: TextDirection.rtl,
         child: AlertDialog(
           backgroundColor: const Color(0xFF15181A),
-          title: const Text('اتصال به وای‌فای برد'),
+          title: const Text('اجازه اتصال خودکار به برد'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
                 currentSsid.isEmpty
-                    ? 'ارتباط با برد برقرار نشد و شبکه فعلی گوشی قابل تشخیص نیست. اگر می‌خواهید، اپ تلاش کند به وای‌فای برد وصل شود.'
-                    : 'ارتباط با برد برقرار نشد. گوشی الان به «$currentSsid» وصل است. اگر می‌خواهید، اپ تلاش کند به وای‌فای برد وصل شود.',
+                    ? 'ارتباط با برد برقرار نشد و شبکه فعلی گوشی قابل تشخیص نیست. اگر اجازه بدهید، اپ یک‌بار دسترسی اتصال به وای‌فای برد را می‌گیرد و از این به بعد هر وقت ارتباط قطع شد خودش دوباره برای اتصال تلاش می‌کند.'
+                    : 'ارتباط با برد برقرار نشد. گوشی الان به «$currentSsid» وصل است. اگر اجازه بدهید، اپ یک‌بار دسترسی اتصال به وای‌فای برد را می‌گیرد و از این به بعد هر وقت ارتباط قطع شد خودش دوباره برای اتصال تلاش می‌کند.',
               ),
               const SizedBox(height: 14),
               TextField(
@@ -193,14 +202,14 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'در Android 10 به بالا، سیستم ممکن است برای اتصال یک پنجره تأیید نشان بدهد. این محدودیت خود اندروید است و اتصال کاملاً بی‌اجازه ممکن نیست.',
+                'در اندرویدهای جدید ممکن است خود گوشی یک پنجره تأیید اتصال نشان دهد. آن را تأیید کنید. بعد از آن، اپ تلاش می‌کند قطع ارتباط‌های بعدی را خودش جبران کند.',
                 style: TextStyle(fontSize: 12, color: Colors.white60),
               ),
             ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('نه')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('وصل شو')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('اجازه می‌دهم و وصل شو')),
           ],
         ),
       ),
@@ -213,13 +222,14 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
     _wifiDialogOpen = false;
 
     if (shouldConnect == true && ssid.isNotEmpty) {
+      await _controller.runJavaScript("localStorage.setItem('esp32WifiAutoApproved','1');");
       await _connectToWifi(ssid, pass);
     }
   }
 
-  Future<void> _connectToWifi(String ssid, String password) async {
+  Future<void> _connectToWifi(String ssid, String password, {bool silent = false, int retry = 0}) async {
     try {
-      _showSnack('در حال درخواست اتصال به $ssid ...');
+      if (!silent) _showSnack('در حال تلاش برای اتصال به وای‌فای برد: $ssid');
 
       final response = await _wifiChannel.invokeMethod<dynamic>('connect', {
         'ssid': ssid,
@@ -228,19 +238,27 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
       final status = response?.toString() ?? 'failed';
 
       if (status == 'requested' || status == 'true') {
-        _showSnack('درخواست اتصال به $ssid ارسال شد. اگر پنجره تأیید اندروید نمایش داده شد، آن را تأیید کنید.');
+        if (!silent) {
+          _showSnack('درخواست اتصال ارسال شد. اگر گوشی پنجره تأیید نشان داد، گزینه اتصال را تأیید کنید.');
+        }
         await Future<void>.delayed(const Duration(seconds: 5));
         await _controller.runJavaScript('fetchStatus(); loadSettings();');
       } else if (status == 'permission_requested') {
-        _showSnack('دسترسی WiFi/Location درخواست شد. بعد از تأیید دسترسی، دوباره دکمه اتصال را بزنید.');
+        _showSnack('گوشی اجازه دسترسی WiFi/موقعیت مکانی را می‌خواهد. اجازه را تأیید کنید؛ اپ چند ثانیه دیگر دوباره تلاش می‌کند.');
+        if (retry < 2) {
+          await Future<void>.delayed(const Duration(seconds: 4));
+          await _connectToWifi(ssid, password, silent: silent, retry: retry + 1);
+        }
       } else {
-        _showSnack(
-          'اتصال خودکار انجام نشد. اگر اندروید درخواست اتصال نشان داد، تأیید کنید؛ یا دستی به شبکه $ssid وصل شوید.',
-          isError: true,
-        );
+        if (!silent) {
+          _showSnack(
+            'اتصال خودکار انجام نشد. اگر پنجره اتصال اندروید نمایش داده شد آن را تأیید کنید، یا دستی به شبکه $ssid وصل شوید.',
+            isError: true,
+          );
+        }
       }
     } catch (e) {
-      _showSnack('خطا در اتصال به وای‌فای: $e', isError: true);
+      if (!silent) _showSnack('خطا در اتصال به وای‌فای برد: $e', isError: true);
     }
   }
 
