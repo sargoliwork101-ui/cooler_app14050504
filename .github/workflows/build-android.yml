@@ -1,0 +1,59 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android_app_flutter
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project files
+        run: |
+          rm -rf android
+          flutter create --platforms=android .
+
+      - name: Allow ESP32 local HTTP traffic on Android
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          if 'android.permission.INTERNET' not in s:
+              s = s.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />')
+          if 'usesCleartextTraffic' not in s:
+              s = s.replace('<application\n', '<application\n        android:usesCleartextTraffic="true"\n', 1)
+          p.write_text(s)
+          PY
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-cooler-release-apk
+          path: android_app_flutter/build/app/outputs/flutter-apk/app-release.apk
