@@ -1,14 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
     <application
         android:label="Smart Cooler"
         android:usesCleartextTraffic="true">
         <!--
           If you generate a Flutter project with `flutter create .`, keep your normal MainActivity
-          declaration here. The important settings for this app are INTERNET permission and
-          usesCleartextTraffic=true because ESP32 serves plain HTTP on local/AP IPs.
+          declaration here. The important settings for this app are INTERNET permission,
+          usesCleartextTraffic=true because ESP serves plain HTTP on local/AP IPs, and WiFi
+          permissions for the optional one-tap board WiFi connection helper.
         -->
     </application>
 </manifest>
