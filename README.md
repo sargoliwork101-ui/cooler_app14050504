@@ -3,7 +3,7 @@
 این بسته شامل دو خروجی اصلی است:
 
 - `esp32_api/Cooler_ESP32_WROOM_API.ino` — نسخه refactor شده ESP32 بدون HTML/CSS/JS داخلی و فقط با REST API مبتنی بر JSON.
-- `android_app_flutter/` — اپ Flutter برای Android که ظاهر پنل قبلی را با کارت‌های تاریک، کولر متحرک، ساعت، اینترنت، سلامت موتور، سناریوها و تنظیمات بازسازی می‌کند.
+- `android_app_flutter/` — اپ Flutter WebView برای Android که همان HTML/CSS/SVG/JS پنل قبلی را داخل خود اپ اجرا می‌کند تا ظاهر تا حد ممکن دقیقاً مشابه وب‌پنل اصلی باشد.
 
 ## ESP32
 
@@ -92,7 +92,7 @@ POST /save-ap-cycle
 6. بعد از سبز شدن build، پایین صفحه همان run در بخش **Artifacts** فایل `smart-cooler-release-apk` را دانلود کنید.
 7. داخل artifact، فایل `app-release.apk` همان برنامه اندروید است.
 
-Workflow خودش Flutter را روی سرور GitHub نصب می‌کند، فایل‌های Android project را با `flutter create --platforms=android .` می‌سازد، اجازه HTTP محلی برای ESP32 را در Manifest اضافه می‌کند و APK release خروجی می‌دهد.
+Workflow خودش Flutter را روی سرور GitHub نصب می‌کند، فایل‌های Android project را با `flutter create --platforms=android .` می‌سازد، اجازه HTTP محلی برای ESP32 را در Manifest اضافه می‌کند و APK release خروجی می‌دهد. این نسخه WebView است و UI اصلی در `assets/web/index.html` قرار دارد.
 
 ### اگر بعداً خواستید روی سیستم خودتان بسازید
 
@@ -129,4 +129,4 @@ android/app/src/main/AndroidManifest.xml
 - HTML/CSS/JS و `webpage.h` از ESP32 حذف شد.
 - endpointهای قدیمی حفظ شدند و خروجی آن‌ها JSON شد.
 - منطق سناریو، NTP، محافظت کمپرسور، LittleFS، Round-Robin، Watchdog، AES و AP/STA باقی ماند.
-- UI Flutter با پالت رنگ، خط‌های کم‌رنگ، سایه‌ها و فونت Vazirmatn نزدیک‌تر به پنل اصلی تنظیم شد. پشتیبان‌گیری/بازیابی سناریوها هم از فایل JSON داخل گوشی انجام می‌شود، نه کلیپ‌بورد.
+- اپ Android به نسخه WebView تغییر کرد: همان CSS/SVG/چیدمان پنل اصلی داخل اپ embed شده است، ESP32 همچنان فقط JSON API می‌دهد، آدرس ESP32 با کلیک روی نشانگر اتصال تغییر می‌کند، و پشتیبان‌گیری/بازیابی سناریوها از فایل JSON داخل گوشی انجام می‌شود.
