@@ -1160,8 +1160,12 @@ class CoolerPainter extends CustomPainter {
     canvas.drawRRect(grille, Paint()..color = const Color(0xFF111719));
     canvas.drawRRect(grille, Paint()..style = PaintingStyle.stroke..strokeWidth = 1.4..color = const Color(0xFF5C6A6D));
     final linePaint = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2..strokeCap = StrokeCap.round..color = const Color(0xDD526166);
-    for (final y in [48.0, 58, 68, 78, 88, 98]) {
-      canvas.drawLine(Offset(y == 98 ? 50 : 46, y), Offset(y == 98 ? 92 : 96, y), linePaint);
+    for (final double y in <double>[48.0, 58.0, 68.0, 78.0, 88.0, 98.0]) {
+      canvas.drawLine(
+        Offset(y == 98.0 ? 50.0 : 46.0, y),
+        Offset(y == 98.0 ? 92.0 : 96.0, y),
+        linePaint,
+      );
     }
 
     canvas.save();
@@ -1184,8 +1188,10 @@ class CoolerPainter extends CustomPainter {
 
     if (active) {
       final airPaint = Paint()..style = PaintingStyle.stroke..strokeCap = StrokeCap.round..strokeWidth = 2.1..color = accent.withOpacity(.35 + .65 * (math.sin(progress * math.pi * 2).abs()));
-      for (final y in [48.0, 61, 74]) {
-        final path = Path()..moveTo(108, y)..cubicTo(121, y - 5, 125, y + 2, 135, y - 4);
+      for (final double y in <double>[48.0, 61.0, 74.0]) {
+        final path = Path()
+          ..moveTo(108.0, y)
+          ..cubicTo(121.0, y - 5.0, 125.0, y + 2.0, 135.0, y - 4.0);
         canvas.drawPath(path, airPaint);
       }
     }
