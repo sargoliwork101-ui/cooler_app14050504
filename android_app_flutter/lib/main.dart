@@ -624,7 +624,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget clockPanel() {
     final s = status;
     final dayNames = ['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'];
-    final date = s == null ? '--' : '${dayNames[s.weekday.clamp(0, 6)]} — ${formatJalaliDate(s.year, s.month, s.day)}';
+    final date = s == null ? '--' : '${dayNames[s.weekday.clamp(0, 6).toInt()]} — ${formatJalaliDate(s.year, s.month, s.day)}';
     return NeuPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
