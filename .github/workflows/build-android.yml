@@ -58,6 +58,136 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Add native WiFi MethodChannel
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main_files = list(Path('android/app/src/main/kotlin').rglob('MainActivity.kt'))
+          if not main_files:
+              raise SystemExit('MainActivity.kt not found')
+          p = main_files[0]
+          old = p.read_text()
+          m = re.search(r'^package\s+(.+)$', old, re.M)
+          package = m.group(1).strip() if m else 'com.example.smart_cooler_app'
+          code = f'''package {package}
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.wifi.WifiConfiguration
+import android.net.wifi.WifiManager
+import android.net.wifi.WifiNetworkSpecifier
+import android.os.Build
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity: FlutterActivity() {{
+    private val channelName = "smart_cooler/wifi"
+    private var wifiNetworkCallback: ConnectivityManager.NetworkCallback? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {{
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler {{ call, result ->
+            when (call.method) {{
+                "getSsid" -> result.success(getCurrentSsid())
+                "connect" -> {{
+                    val ssid = call.argument<String>("ssid") ?: ""
+                    val password = call.argument<String>("password") ?: ""
+                    if (ssid.isBlank()) result.success(false) else result.success(connectToWifi(ssid, password))
+                }}
+                else -> result.notImplemented()
+            }}
+        }}
+    }}
+
+    private fun hasPermission(permission: String): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED else true
+
+    private fun ensureWifiPermissions(): Boolean {{
+        val needed = mutableListOf<String>()
+        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= 33 && !hasPermission(Manifest.permission.NEARBY_WIFI_DEVICES)) {{
+            needed.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }}
+        if (needed.isNotEmpty()) {{
+            requestPermissions(needed.toTypedArray(), 7101)
+            return false
+        }}
+        return true
+    }}
+
+    private fun getCurrentSsid(): String {{
+        return try {{
+            if (!ensureWifiPermissions()) return ""
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            var ssid = wifiManager.connectionInfo?.ssid ?: ""
+            if (ssid.startsWith("\"") && ssid.endsWith("\"") && ssid.length >= 2) ssid = ssid.substring(1, ssid.length - 1)
+            if (ssid == "<unknown ssid>") "" else ssid
+        }} catch (e: Exception) {{
+            ""
+        }}
+    }}
+
+    private fun connectToWifi(ssid: String, password: String): Boolean {{
+        if (!ensureWifiPermissions()) return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) connectAndroidQPlus(ssid, password) else connectLegacy(ssid, password)
+    }}
+
+    private fun connectAndroidQPlus(ssid: String, password: String): Boolean {{
+        return try {{
+            val specBuilder = WifiNetworkSpecifier.Builder().setSsid(ssid)
+            if (password.isNotEmpty()) specBuilder.setWpa2Passphrase(password)
+            val request = NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .setNetworkSpecifier(specBuilder.build())
+                .build()
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            wifiNetworkCallback?.let {{ cm.unregisterNetworkCallback(it) }}
+            wifiNetworkCallback = object : ConnectivityManager.NetworkCallback() {{
+                override fun onAvailable(network: Network) {{
+                    super.onAvailable(network)
+                    cm.bindProcessToNetwork(network)
+                }}
+            }}
+            cm.requestNetwork(request, wifiNetworkCallback!!)
+            true
+        }} catch (e: Exception) {{
+            false
+        }}
+    }}
+
+    @Suppress("DEPRECATION")
+    private fun connectLegacy(ssid: String, password: String): Boolean {{
+        return try {{
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            if (!wifiManager.isWifiEnabled) wifiManager.isWifiEnabled = true
+            val config = WifiConfiguration()
+            config.SSID = "\"$ssid\""
+            if (password.isEmpty()) config.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE) else config.preSharedKey = "\"$password\""
+            val netId = wifiManager.addNetwork(config)
+            if (netId == -1) return false
+            wifiManager.disconnect()
+            wifiManager.enableNetwork(netId, true)
+            wifiManager.reconnect()
+            true
+        }} catch (e: Exception) {{
+            false
+        }}
+    }}
+}}
+'''
+          p.write_text(code)
+          print(f'Wrote native WiFi MethodChannel to {p}')
+          PY
+
       - name: Get dependencies
         run: flutter pub get
 

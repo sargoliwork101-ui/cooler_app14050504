@@ -14,7 +14,6 @@ dependencies:
   # نسخه‌های قدیمی بعضی pluginها با Flutter/Android جدید روی GitHub Actions
   # با compileSdk پایین ساخته می‌شوند؛ workflow هم compileSdk=36 را force می‌کند.
   file_picker: ^10.3.3
-  wifi_iot: ^0.3.19
 
 flutter:
   uses-material-design: true

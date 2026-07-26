@@ -4,8 +4,8 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:wifi_iot/wifi_iot.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,6 +36,8 @@ class SmartCoolerWebViewScreen extends StatefulWidget {
 }
 
 class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
+  static const MethodChannel _wifiChannel = MethodChannel('smart_cooler/wifi');
+
   late final WebViewController _controller;
   bool _loading = true;
   bool _wifiDialogOpen = false;
@@ -121,7 +123,7 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
 
     String currentSsid = '';
     try {
-      currentSsid = _cleanSsid(await WiFiForIoTPlugin.getSSID());
+      currentSsid = _cleanSsid(await _wifiChannel.invokeMethod<String>('getSsid'));
     } catch (_) {
       currentSsid = '';
     }
@@ -217,34 +219,22 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
 
   Future<void> _connectToWifi(String ssid, String password) async {
     try {
-      final enabled = await WiFiForIoTPlugin.isEnabled();
-      if (enabled != true) {
-        await WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: true);
-        _showSnack('اگر وای‌فای خاموش است، آن را روشن کنید و دوباره اتصال را بزنید.');
-        return;
-      }
-
       _showSnack('در حال درخواست اتصال به $ssid ...');
 
-      final connected = await WiFiForIoTPlugin.connect(
-        ssid,
-        password: password,
-        security: password.isEmpty ? NetworkSecurity.NONE : NetworkSecurity.WPA,
-        joinOnce: false,
-        withInternet: false,
-      );
-
-      // برای شبکه AP برد که اینترنت ندارد، مسیر درخواست‌های HTTP باید روی WiFi بماند.
-      try {
-        await WiFiForIoTPlugin.forceWifiUsage(true);
-      } catch (_) {}
+      final connected = await _wifiChannel.invokeMethod<bool>('connect', {
+        'ssid': ssid,
+        'password': password,
+      });
 
       if (connected == true) {
         _showSnack('درخواست اتصال به $ssid ارسال شد. چند ثانیه صبر کنید...');
         await Future<void>.delayed(const Duration(seconds: 4));
         await _controller.runJavaScript('fetchStatus(); loadSettings();');
       } else {
-        _showSnack('اتصال خودکار انجام نشد. اگر پنجره تأیید اندروید نمایش داده شد، آن را تأیید کنید یا دستی به شبکه $ssid وصل شوید.', isError: true);
+        _showSnack(
+          'اتصال خودکار انجام نشد. اگر اندروید درخواست دسترسی/تأیید اتصال نشان داد، تأیید کنید و دوباره تلاش کنید؛ یا دستی به شبکه $ssid وصل شوید.',
+          isError: true,
+        );
       }
     } catch (e) {
       _showSnack('خطا در اتصال به وای‌فای: $e', isError: true);
