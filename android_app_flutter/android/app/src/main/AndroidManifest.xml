@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:label="Smart Cooler"
+        android:usesCleartextTraffic="true">
+        <!--
+          If you generate a Flutter project with `flutter create .`, keep your normal MainActivity
+          declaration here. The important settings for this app are INTERNET permission and
+          usesCleartextTraffic=true because ESP32 serves plain HTTP on local/AP IPs.
+        -->
+    </application>
+</manifest>
