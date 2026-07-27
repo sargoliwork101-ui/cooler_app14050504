@@ -129,6 +129,10 @@ const unsigned long NTP_RECHECK_INTERVAL_MS = 1UL * 60UL * 60UL * 1000UL;
 
 WebServer server(80);
 
+// رمز ثابت ریست کامل حافظه برد. طبق درخواست کاربر نیازی به تغییر ندارد.
+const char* FACTORY_RESET_CODE = "123456";
+bool pendingFactoryReset = false;
+
 void feedWatchdog();
 
 // ESP32 در این نسخه هیچ HTML/CSS/JS تولید نمی‌کند؛ فقط API JSON ارائه می‌شود.
@@ -200,6 +204,7 @@ unsigned long lastSaveApRequest = 0;
 unsigned long lastSaveStaRequest = 0;
 unsigned long lastSaveProtectionRequest = 0;
 unsigned long lastSaveApCycleRequest = 0;
+unsigned long lastFactoryResetRequest = 0;
 unsigned long lastStatusRequest = 0;
 
 // ============ مدیریت ذخیره امن زمان (برای مقاومت در برابر نوسان برق) ============
@@ -222,6 +227,13 @@ const char* RELAY_STAT_FILES[2] = {"/relaystat0.txt", "/relaystat1.txt"};
 int relayStatFileSlot = 0;
 unsigned long relayStatSaveSeq = 0;
 unsigned long lastRelayStatSaveMillis = 0; // زمان آخرین ذخیره‌سازی دوره‌ای پیشرفت مدت‌کارکرد جاری
+
+// سقف‌های sanity برای جلوگیری از نمایش/ذخیره عددهای پرت در آمار موتور.
+// اگر فایل آمار هنگام قطع برق/خرابی فلش مقدار غیرواقعی داشته باشد، هنگام خواندن رد می‌شود.
+// همچنین اگر به هر دلیل زمان شروع دوره روشن بودن خراب شود، یک جهش بزرگ به مجموع کارکرد اضافه نمی‌شود.
+const unsigned long MAX_RELAY_SWITCH_COUNT = 500000UL;
+const unsigned long MAX_RELAY_ON_SECONDS   = 10UL * 365UL * 24UL * 60UL * 60UL; // ۱۰ سال کارکرد واقعی
+const unsigned long MAX_RELAY_OPEN_PERIOD_SECONDS = (TIME_SAVE_INTERVAL / 1000UL) * 2UL + 120UL;
 // =================================================================================
 
 // تعریف توابع سیستم
@@ -241,6 +253,8 @@ bool isLeapYear(int year);
 void saveRelayStats();
 void loadRelayStats();
 bool readRelayStatFile(const char* path, unsigned long &sc, unsigned long &tos, unsigned long &seq);
+unsigned long relayCurrentPeriodElapsedSeconds();
+void addRelayOnSecondsSafely(unsigned long secondsToAdd);
 void loadNtpSuccessInfo();
 void saveNtpSuccessInfo();
 void handleApiRoot();
@@ -253,6 +267,7 @@ void handleSaveAP();
 void handleSaveSTA();
 void handleSaveProtection();
 void handleSaveApCycle();
+void handleFactoryReset();
 bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs);
 void sendJsonMessage(int code, const char* status, const char* message);
 bool parseJsonBody(JsonDocument &doc);
@@ -561,6 +576,9 @@ void setup() {
     relayOnSinceMillis = millis();
     relayCurrentlyOnForStats = true;
   }
+  // مهم: تایمر ذخیره دوره‌ای آمار را هم‌زمان با بوت مقداردهی کن تا اگر رله از بوت روشن بود،
+  // اختلاف از صفر millis حساب نشود و عدد پرت به onSeconds اضافه نشود.
+  lastRelayStatSaveMillis = millis();
 
   // راه‌اندازی وای‌فای به صورت همزمان: AP برای اتصال مستقیم گوشی + STA برای اتصال اختیاری به اینترنت
   WiFi.mode(WIFI_AP_STA);
@@ -589,6 +607,7 @@ void setup() {
   server.on("/save-sta", HTTP_POST, handleSaveSTA);
   server.on("/save-protection", HTTP_POST, handleSaveProtection);
   server.on("/save-ap-cycle", HTTP_POST, handleSaveApCycle);
+  server.on("/factory-reset", HTTP_POST, handleFactoryReset);
 
   server.onNotFound([](){
     if (server.method() == HTTP_OPTIONS) {
@@ -626,7 +645,7 @@ void loop() {
 
   // مدیریت ریستارت نرم‌افزاری امن 
   if (pendingReset && (millis() - resetMillis > 2000)) {
-    saveTimeSetting(); 
+    if (!pendingFactoryReset) saveTimeSetting();
     ESP.restart();
   }
 
@@ -647,9 +666,13 @@ void loop() {
   // طولانی روشن بماند و درست وسط آن برق قطع شود، حداکثر همین چند دقیقه از مدت‌کارکرد از دست برود.
   // نقطه‌ی شروع دوره جلو کشیده می‌شود تا هنگام محاسبه بعدی، مدت قبلاً ذخیره‌شده دوباره شمارش نشود.
   if (relayCurrentlyOnForStats && (millis() - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
-    unsigned long elapsedSec = (millis() - relayOnSinceMillis) / 1000UL;
-    relayTotalOnSeconds += elapsedSec;
-    relayOnSinceMillis += elapsedSec * 1000UL;
+    unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
+    if (elapsedSec > 0) {
+      addRelayOnSecondsSafely(elapsedSec);
+      relayOnSinceMillis = millis();
+    } else {
+      relayOnSinceMillis = millis();
+    }
     saveRelayStats();
   }
 
@@ -796,7 +819,7 @@ void checkScenarios() {
     } else {
       // کمپرسور تازه خاموش شد: مدت این دوره به مجموع اضافه می‌شود
       if (relayCurrentlyOnForStats) {
-        relayTotalOnSeconds += (millis() - relayOnSinceMillis) / 1000UL;
+        addRelayOnSecondsSafely(relayCurrentPeriodElapsedSeconds());
       }
       relayCurrentlyOnForStats = false;
       lastRelayOffMillis = millis();
@@ -1178,6 +1201,41 @@ void saveNtpSuccessInfo() {
   }
 }
 
+// محاسبه امن مدت دوره جاری روشن بودن رله.
+// اگر relayOnSinceMillis به هر دلیل خراب/صفر باشد یا فاصله غیرمنطقی شود، از اضافه شدن عدد پرت جلوگیری می‌کنیم.
+unsigned long relayCurrentPeriodElapsedSeconds() {
+  if (!relayCurrentlyOnForStats) return 0;
+  if (relayOnSinceMillis == 0) {
+    Serial.println("Relay stats warning: relayOnSinceMillis was zero; re-anchoring.");
+    relayOnSinceMillis = millis();
+    return 0;
+  }
+
+  unsigned long elapsedSec = (millis() - relayOnSinceMillis) / 1000UL;
+  if (elapsedSec > MAX_RELAY_OPEN_PERIOD_SECONDS) {
+    Serial.print("Relay stats warning: unrealistic open period ignored: ");
+    Serial.println(elapsedSec);
+    relayOnSinceMillis = millis();
+    return 0;
+  }
+  return elapsedSec;
+}
+
+// اضافه کردن امن به مجموع کارکرد موتور بدون overflow و بدون عبور از سقف sanity.
+void addRelayOnSecondsSafely(unsigned long secondsToAdd) {
+  if (secondsToAdd == 0) return;
+  if (relayTotalOnSeconds > MAX_RELAY_ON_SECONDS) {
+    Serial.println("Relay stats warning: stored onSeconds was unrealistic; resetting to 0.");
+    relayTotalOnSeconds = 0;
+  }
+  if (secondsToAdd > (MAX_RELAY_ON_SECONDS - relayTotalOnSeconds)) {
+    Serial.println("Relay stats warning: onSeconds overflow/unrealistic add blocked.");
+    relayTotalOnSeconds = MAX_RELAY_ON_SECONDS;
+  } else {
+    relayTotalOnSeconds += secondsToAdd;
+  }
+}
+
 // خواندن و اعتبارسنجی یکی از دو فایل آمار رله
 bool readRelayStatFile(const char* path, unsigned long &sc, unsigned long &tos, unsigned long &seq) {
   if (!LittleFS.exists(path)) return false;
@@ -1192,6 +1250,11 @@ bool readRelayStatFile(const char* path, unsigned long &sc, unsigned long &tos, 
   int fileVersion = 1;
   int parsed = val.startsWith("V") ? sscanf(val.c_str(), "V%d:%lu:%lu:%lu", &fileVersion, &tsc, &ttos, &tseq) : sscanf(val.c_str(), "%lu:%lu:%lu", &tsc, &ttos, &tseq);
   if (parsed != (val.startsWith("V") ? 4 : 3)) return false; // نوشتن ناقص هنگام قطع برق؛ این رکورد نامعتبر است
+  if (tsc > MAX_RELAY_SWITCH_COUNT || ttos > MAX_RELAY_ON_SECONDS) {
+    Serial.print("Invalid relay stats ignored from ");
+    Serial.println(path);
+    return false;
+  }
 
   sc = tsc; tos = ttos; seq = tseq;
   return true;
@@ -1385,6 +1448,7 @@ void handleApiRoot() {
   endpoints.add("POST /save-sta");
   endpoints.add("POST /save-protection");
   endpoints.add("POST /save-ap-cycle");
+  endpoints.add("POST /factory-reset");
   String out;
   serializeJson(doc, out);
   server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -1569,7 +1633,10 @@ void handleGetStatus() {
   }
 
   unsigned long liveOnSeconds = relayTotalOnSeconds;
-  if (relayCurrentlyOnForStats) liveOnSeconds += (millis() - relayOnSinceMillis) / 1000UL;
+  if (relayCurrentlyOnForStats) {
+    unsigned long elapsed = relayCurrentPeriodElapsedSeconds();
+    if (elapsed <= (MAX_RELAY_ON_SECONDS - liveOnSeconds)) liveOnSeconds += elapsed;
+  }
 
   long protectionRemainingSec = 0;
   if (antiShortCycleMinutes > 0 && lastRelayStatState == 0) {
@@ -1759,6 +1826,38 @@ void handleSaveProtection() {
   antiShortCycleMinutes = value;
   saveProtectionSettings();
   sendJsonMessage(200, "success", "Protection settings saved");
+}
+
+void handleFactoryReset() {
+  if (!allowRequest(lastFactoryResetRequest, 5000UL)) return;
+
+  StaticJsonDocument<128> doc;
+  if (!parseJsonBody(doc)) return;
+
+  const char* code = doc["code"] | doc["password"] | "";
+  if (String(code) != String(FACTORY_RESET_CODE)) {
+    sendJsonMessage(403, "error", "Invalid reset code");
+    return;
+  }
+
+  // برای ایمنی، قبل از ریست کامل حافظه رله خاموش و حالت دستی پاک می‌شود.
+  manual_override = 0;
+  setRelay(false);
+  relayCurrentlyOnForStats = false;
+
+  // ریست کامل حافظه فایل‌سیستم: سناریوها، زمان، آمار، تنظیمات WiFi، محافظت، override و NTP meta.
+  bool ok = LittleFS.format();
+  if (!ok) {
+    sendJsonMessage(500, "error", "LittleFS format failed");
+    return;
+  }
+
+  sendJsonMessage(200, "success", "Factory reset done; restarting");
+
+  // مهم: در loop قبل از ریست دیگر saveTimeSetting انجام نشود، وگرنه پس از format دوباره فایل زمان ساخته می‌شود.
+  pendingFactoryReset = true;
+  pendingReset = true;
+  resetMillis = millis();
 }
 
 void handleSaveApCycle() {

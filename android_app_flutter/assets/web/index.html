@@ -229,6 +229,15 @@
     .api-modal-actions button{flex:1;padding:12px;border-radius:12px;border:none;font-family:var(--font-fa);font-weight:800;}
     .api-save{background:var(--accent);color:var(--on-accent);}
     .api-cancel{background:var(--panel-2);color:var(--text-dim);border:1px solid var(--line-strong)!important;}
+    .reset-stats-card{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+    .reset-stats-icon{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--off-dim);border:1px solid var(--off);color:var(--off);box-shadow:0 0 18px rgba(255,84,104,.10);flex-shrink:0;}
+    .reset-stats-icon svg{width:24px;height:24px;}
+    .reset-stats-text{flex:1;min-width:0;}
+    .reset-stats-title{font-weight:800;font-size:.9rem;color:var(--text);margin-bottom:4px;}
+    .reset-stats-sub{font-size:.74rem;color:var(--text-dim);line-height:1.8;}
+    .reset-stats-btn{width:100%;padding:14px;border-radius:var(--btn-radius);border:1px solid var(--off);background:var(--off-dim);color:var(--off);font-family:var(--font-fa);font-weight:900;font-size:.92rem;cursor:pointer;box-shadow:4px 4px 10px rgba(0,0,0,.45), -3px -3px 8px rgba(255,255,255,.04);}
+    .factory-reset-icon{background:rgba(242,169,59,.14);border-color:var(--warn);color:var(--warn);}
+    .factory-reset-btn{border-color:var(--warn);background:var(--warn-dim);color:var(--warn);}
   </style>
 </head>
 <body>
@@ -246,6 +255,16 @@
     <div class="api-modal-actions">
       <button class="api-save" onclick="saveApiBaseFromModal()">ذخیره و اتصال</button>
       <button class="api-cancel" onclick="closeApiModal()">انصراف</button>
+    </div>
+  </div>
+
+  <div id="factory-reset-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(15,18,19,.97); border:1px solid var(--off); border-radius:22px; padding:24px; z-index:10003; box-shadow:0 24px 70px rgba(0,0,0,.7); backdrop-filter:blur(32px); -webkit-backdrop-filter:blur(32px); width:90%; max-width:400px; text-align:right;">
+    <h3 style="margin:0 0 12px;color:var(--off);font-size:1rem;">ریست کامل حافظه برد</h3>
+    <p style="margin:0 0 14px;color:var(--text-dim);font-size:.78rem;line-height:1.9;">این کار همه سناریوها، زمان‌بندی‌ها، تنظیمات WiFi، آمار موتور، ساعت ذخیره‌شده و تنظیمات محافظت را از حافظه برد پاک می‌کند و برد ری‌استارت می‌شود.</p>
+    <input id="factory-reset-code" type="password" maxlength="6" inputmode="numeric" placeholder="رمز ۶ رقمی" autocomplete="off" style="width:100%; padding:12px 13px; border-radius:9px; border:1px solid var(--off); background:var(--panel-2); color:var(--text); font-family:var(--font-mono); font-size:.95rem; direction:ltr; text-align:center; margin-bottom:12px; letter-spacing:3px;">
+    <div class="api-modal-actions">
+      <button class="api-save" style="background:var(--off);color:#fff;" onclick="submitFactoryReset()">ریست کامل</button>
+      <button class="api-cancel" onclick="closeFactoryResetModal()">انصراف</button>
     </div>
   </div>
 
@@ -354,6 +373,20 @@
         <form onsubmit='saveProtectionForm(event)'><div class='panel rivets'><div class='panel-label'><h3 class='bar'>محافظت کمپرسور</h3></div><div class='hint'>حداقل مدت خاموش‌بودن کولر پیش از روشن‌شدن دوباره را تعیین کنید. این محافظت برای سناریو و روشن‌کردن دستی اعمال می‌شود. مقدار ۰ یعنی غیرفعال.</div>
           <div class='field'><label>حداقل فاصله خاموش تا روشن (دقیقه، ۰ تا ۱۴۴۰)</label><input type='number' name='min_off' id='min-off' min='0' max='1440' step='1' inputmode='numeric'></div>
           <div style='font-size:.82rem; color:var(--text-dim); margin-bottom:16px;'>وضعیت محافظت: <span id='protection-status'>در حال بررسی...</span></div><button type='submit' class='wifi-btn'>ذخیره تنظیمات محافظت</button></div></form>
+
+        <div class='panel rivets'>
+          <div class='panel-label'><h3 class='bar'>ریست کامل برد</h3></div>
+          <div class='reset-stats-card'>
+            <div class='reset-stats-icon factory-reset-icon' aria-hidden='true'>
+              <svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 9v4'/><path d='M12 17h.01'/><path d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/></svg>
+            </div>
+            <div class='reset-stats-text'>
+              <div class='reset-stats-title'>ریست کامل حافظه برد</div>
+              <div class='reset-stats-sub'>همه سناریوها، زمان‌بندی‌ها، تنظیمات WiFi، ساعت ذخیره‌شده، آمار موتور و تنظیمات محافظت پاک می‌شود. رمز ثابت این عملیات ۱۲۳۴۵۶ است.</div>
+            </div>
+          </div>
+          <button type='button' class='reset-stats-btn factory-reset-btn' onclick='openFactoryResetModal()'>ریست کامل حافظه برد</button>
+        </div>
       </div>
     </div>
 
@@ -392,6 +425,9 @@ function closeAlert(){ document.getElementById('custom-alert-overlay').style.dis
 function openApiModal(){ document.getElementById('api-base-input').value=apiBase; document.getElementById('custom-alert-overlay').style.display='block'; document.getElementById('api-modal').style.display='block'; }
 function closeApiModal(){ document.getElementById('api-modal').style.display='none'; document.getElementById('custom-alert-overlay').style.display='none'; }
 function saveApiBaseFromModal(){ apiBase=normalizeBaseUrl(document.getElementById('api-base-input').value); localStorage.setItem('esp32ApiBase',apiBase); closeApiModal(); resetActivity(); loadSettings(); fetchStatus(); showToast('آدرس اتصال ذخیره شد: '+apiBase,'good'); }
+function openFactoryResetModal(){ document.getElementById('factory-reset-code').value=''; document.getElementById('custom-alert-overlay').style.display='block'; document.getElementById('factory-reset-modal').style.display='block'; setTimeout(()=>document.getElementById('factory-reset-code').focus(),150); }
+function closeFactoryResetModal(){ document.getElementById('factory-reset-modal').style.display='none'; document.getElementById('custom-alert-overlay').style.display='none'; }
+function submitFactoryReset(){ const code=document.getElementById('factory-reset-code').value.trim(); if(code!=='123456'){ showToast('رمز ریست کامل اشتباه است.','bad'); return; } if(!confirm('این عملیات همه حافظه برد را پاک می‌کند و برد ری‌استارت می‌شود. آیا مطمئن هستید؟')) return; postJson('/factory-reset',{code:code}).then(r=>{ if(!r.ok) throw new Error(); localStorage.removeItem('esp32ApSsid'); localStorage.removeItem('esp32ApPass'); localStorage.removeItem('esp32WifiAutoApproved'); closeFactoryResetModal(); showModal('حافظه برد پاک شد. برد در حال ری‌استارت است. بعد از چند ثانیه دوباره به WiFi پیش‌فرض برد وصل شوید.'); setTimeout(()=>{fetchStatus(); loadSettings();},5000); }).catch(()=>showToast('خطا در ریست کامل حافظه برد! اتصال به برد یا رمز را بررسی کنید.','bad')); }
 
 function showToast(msg, kind){ const wrap=document.getElementById('toast-wrap'); if(!wrap) return; const el=document.createElement('div'); el.className='toast toast-'+kind; el.innerText=msg; wrap.appendChild(el); requestAnimationFrame(()=>el.classList.add('show')); setTimeout(()=>{el.classList.remove('show'); setTimeout(()=>el.remove(),300);},3800); }
 function togglePasswordVisibility(){ const passInput=document.getElementById('wifi-pass'); const eyeIcon=document.getElementById('eye-icon'); if(!passInput) return; if(passInput.type==='password'){ passInput.type='text'; if(eyeIcon) eyeIcon.innerHTML='<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'; } else { passInput.type='password'; if(eyeIcon) eyeIcon.innerHTML='<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'; } }
