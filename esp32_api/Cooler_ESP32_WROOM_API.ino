@@ -129,7 +129,7 @@ const unsigned long NTP_RECHECK_INTERVAL_MS = 1UL * 60UL * 60UL * 1000UL;
 
 WebServer server(80);
 
-// رمز ثابت ریست کامل حافظه برد. طبق درخواست کاربر نیازی به تغییر ندارد.
+// کد ثابت ریست کامل حافظه برد؛ در UI به کاربر نمایش داده نمی‌شود.
 const char* FACTORY_RESET_CODE = "123456";
 bool pendingFactoryReset = false;
 
@@ -271,6 +271,8 @@ void handleFactoryReset();
 bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs);
 void sendJsonMessage(int code, const char* status, const char* message);
 bool parseJsonBody(JsonDocument &doc);
+String fnv1aChecksum(const String &data);
+JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok);
 void checkScenarios();
 void updateClock();
 void setRelay(bool state);
@@ -347,6 +349,42 @@ bool parseJsonBody(JsonDocument &doc) {
     return false;
   }
   return true;
+}
+
+
+// checksum سبک برای handshake صحت داده بین اپ و برد.
+// اپ payload را JSON.stringify می‌کند، checksum می‌سازد و به شکل {payload, checksum} می‌فرستد.
+// برد قبل از اعمال عملیات، payload را دوباره serialize و checksum را مقایسه می‌کند.
+String fnv1aChecksum(const String &data) {
+  uint32_t hash = 2166136261UL;
+  for (size_t i = 0; i < data.length(); i++) {
+    hash ^= (uint8_t)data[i];
+    hash *= 16777619UL;
+  }
+  char out[9];
+  snprintf(out, sizeof(out), "%08lx", (unsigned long)hash);
+  return String(out);
+}
+
+JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok) {
+  ok = true;
+  if (doc.is<JsonObjectConst>()) {
+    JsonObjectConst obj = doc.as<JsonObjectConst>();
+    if (obj.containsKey("payload") && obj.containsKey("checksum")) {
+      String normalized;
+      serializeJson(obj["payload"], normalized);
+      String expected = fnv1aChecksum(normalized);
+      String received = String((const char*)(obj["checksum"] | ""));
+      if (!expected.equalsIgnoreCase(received)) {
+        sendJsonMessage(400, "error", "Checksum mismatch");
+        ok = false;
+        return JsonVariantConst();
+      }
+      return obj["payload"];
+    }
+  }
+  // سازگاری با درخواست‌های قدیمی بدون handshake
+  return doc.as<JsonVariantConst>();
 }
 
 // تابع کمکی برای سوئیچ کردن رله بر اساس منطق (Active-Low یا Active-High)
@@ -1503,12 +1541,15 @@ void handleSaveScenario() {
 
   DynamicJsonDocument doc(SCENARIOS_JSON_CAPACITY);
   if (!parseJsonBody(doc)) return;
-  if (!doc.is<JsonArray>()) {
+  bool payloadOk = false;
+  JsonVariantConst payload = verifiedPayload(doc, payloadOk);
+  if (!payloadOk) return;
+  if (!payload.is<JsonArrayConst>()) {
     sendJsonMessage(400, "error", "Expected JSON array");
     return;
   }
 
-  JsonArray array = doc.as<JsonArray>();
+  JsonArrayConst array = payload.as<JsonArrayConst>();
   if (array.size() > MAX_SCENARIOS) {
     sendJsonMessage(400, "error", "Too many scenarios");
     return;
@@ -1516,7 +1557,7 @@ void handleSaveScenario() {
 
   Scenario temp[MAX_SCENARIOS] = {};
   int i = 0;
-  for (JsonObject v : array) {
+  for (JsonObjectConst v : array) {
     int sh = v["sh"] | -1;
     int sm = v["sm"] | -1;
     int eh = v["eh"] | -1;
@@ -1573,14 +1614,17 @@ void handleSyncTime() {
 
   StaticJsonDocument<256> doc;
   if (!parseJsonBody(doc)) return;
+  bool payloadOk = false;
+  JsonVariantConst payload = verifiedPayload(doc, payloadOk);
+  if (!payloadOk) return;
 
-  int h = doc["h"] | -1;
-  int m = doc["m"] | -1;
-  int s = doc["s"] | -1;
-  int y = doc["y"] | 0;
-  int mon = doc["mon"] | 0;
-  int d = doc["d"] | 0;
-  int wd = doc["wd"] | -1;
+  int h = payload["h"] | -1;
+  int m = payload["m"] | -1;
+  int s = payload["s"] | -1;
+  int y = payload["y"] | 0;
+  int mon = payload["mon"] | 0;
+  int d = payload["d"] | 0;
+  int wd = payload["wd"] | -1;
 
   if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59 ||
       y < 2024 || mon < 1 || mon > 12 || d < 1 || d > 31 || wd < 0 || wd > 6) {
@@ -1711,8 +1755,11 @@ void handleToggleManual() {
 
   // برای یک API JSON خالص، body لازم نیست. اگر body ارسال شود، فقط معتبر بودن JSON چک می‌شود.
   if (server.hasArg("plain") && server.arg("plain").length() > 0) {
-    StaticJsonDocument<64> ignored;
+    StaticJsonDocument<128> ignored;
     if (!parseJsonBody(ignored)) return;
+    bool payloadOk = false;
+    verifiedPayload(ignored, payloadOk);
+    if (!payloadOk) return;
   }
 
   if (manual_override == 0) {
@@ -1742,11 +1789,14 @@ void handleToggleManual() {
 void handleSaveAP() {
   if (!allowRequest(lastSaveApRequest, 3000UL)) return;
 
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<320> doc;
   if (!parseJsonBody(doc)) return;
+  bool payloadOk = false;
+  JsonVariantConst payload = verifiedPayload(doc, payloadOk);
+  if (!payloadOk) return;
 
-  const char* newSsid = doc["ssid"] | "";
-  const char* newPass = doc["pass"] | "";
+  const char* newSsid = payload["ssid"] | "";
+  const char* newPass = payload["pass"] | "";
   String ssidStr = String(newSsid);
   String passStr = String(newPass);
 
@@ -1768,14 +1818,17 @@ void handleSaveAP() {
 void handleSaveSTA() {
   if (!allowRequest(lastSaveStaRequest, 1500UL)) return;
 
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<640> doc;
   if (!parseJsonBody(doc)) return;
+  bool payloadOk = false;
+  JsonVariantConst payload = verifiedPayload(doc, payloadOk);
+  if (!payloadOk) return;
 
-  String newStaSsid = String((const char*)(doc["sta_ssid"] | ""));
-  String newStaPass = String((const char*)(doc["sta_pass"] | ""));
-  bool newInternet = doc["internet"] | false;
-  int onVal = doc["sta_on_minutes"] | -1;
-  int offVal = doc["sta_off_minutes"] | -1;
+  String newStaSsid = String((const char*)(payload["sta_ssid"] | ""));
+  String newStaPass = String((const char*)(payload["sta_pass"] | ""));
+  bool newInternet = payload["internet"] | false;
+  int onVal = payload["sta_on_minutes"] | -1;
+  int offVal = payload["sta_off_minutes"] | -1;
 
   if (newStaSsid.length() > 31 || newStaPass.length() > 63) {
     sendJsonMessage(400, "error", "SSID or password too long");
@@ -1814,10 +1867,13 @@ void handleSaveSTA() {
 void handleSaveProtection() {
   if (!allowRequest(lastSaveProtectionRequest, 1000UL)) return;
 
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<192> doc;
   if (!parseJsonBody(doc)) return;
+  bool payloadOk = false;
+  JsonVariantConst payload = verifiedPayload(doc, payloadOk);
+  if (!payloadOk) return;
 
-  int value = doc["min_off"] | -1;
+  int value = payload["min_off"] | -1;
   if (value < 0 || value > MAX_ANTI_SHORT_CYCLE_MINUTES) {
     sendJsonMessage(400, "error", "Invalid protection minutes");
     return;
@@ -1831,10 +1887,13 @@ void handleSaveProtection() {
 void handleFactoryReset() {
   if (!allowRequest(lastFactoryResetRequest, 5000UL)) return;
 
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<192> doc;
   if (!parseJsonBody(doc)) return;
+  bool payloadOk = false;
+  JsonVariantConst payload = verifiedPayload(doc, payloadOk);
+  if (!payloadOk) return;
 
-  const char* code = doc["code"] | doc["password"] | "";
+  const char* code = payload["code"] | payload["password"] | "";
   if (String(code) != String(FACTORY_RESET_CODE)) {
     sendJsonMessage(403, "error", "Invalid reset code");
     return;
@@ -1863,13 +1922,16 @@ void handleFactoryReset() {
 void handleSaveApCycle() {
   if (!allowRequest(lastSaveApCycleRequest, 1000UL)) return;
 
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<320> doc;
   if (!parseJsonBody(doc)) return;
+  bool payloadOk = false;
+  JsonVariantConst payload = verifiedPayload(doc, payloadOk);
+  if (!payloadOk) return;
 
-  bool enabled = doc["cycle_enabled"] | false;
-  int onVal = doc["on_minutes"] | -1;
-  int offVal = doc["off_minutes"] | -1;
-  int powerVal = doc["tx_power"] | -1;
+  bool enabled = payload["cycle_enabled"] | false;
+  int onVal = payload["on_minutes"] | -1;
+  int offVal = payload["off_minutes"] | -1;
+  int powerVal = payload["tx_power"] | -1;
 
   if (onVal < MIN_AP_CYCLE_MINUTES || onVal > MAX_AP_CYCLE_MINUTES ||
       offVal < MIN_AP_CYCLE_MINUTES || offVal > MAX_AP_CYCLE_MINUTES ||

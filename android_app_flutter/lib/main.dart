@@ -35,7 +35,7 @@ class SmartCoolerWebViewScreen extends StatefulWidget {
   State<SmartCoolerWebViewScreen> createState() => _SmartCoolerWebViewScreenState();
 }
 
-class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
+class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> with WidgetsBindingObserver {
   static const MethodChannel _wifiChannel = MethodChannel('smart_cooler/wifi');
 
   late final WebViewController _controller;
@@ -45,6 +45,7 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -69,6 +70,29 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
         onMessageReceived: (JavaScriptMessage message) => _handleWifiAssist(message.message),
       )
       ..loadFlutterAsset('assets/web/index.html');
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // اتصال WiFi فقط هنگام بسته‌شدن واقعی/خروج از اپ آزاد می‌شود.
+    // روی paused آزاد نمی‌کنیم چون هنگام نمایش پنجره تأیید WiFi اندروید هم ممکن است paused رخ دهد.
+    if (state == AppLifecycleState.detached) {
+      _releaseWifiBinding();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _releaseWifiBinding();
+    super.dispose();
+  }
+
+  Future<void> _releaseWifiBinding() async {
+    try {
+      await _wifiChannel.invokeMethod<bool>('releaseWifi');
+    } catch (_) {}
   }
 
   Future<void> _exportScenarioBackup(String jsonText) async {
@@ -109,6 +133,7 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
   }
 
   Future<void> _handleWifiAssist(String message) async {
+    String action = 'connect';
     String targetSsid = 'ESP32_Timer_Hub';
     String targetPass = '12345678';
     bool force = false;
@@ -116,12 +141,21 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
     try {
       final data = jsonDecode(message);
       if (data is Map) {
+        action = data['action']?.toString() ?? action;
         targetSsid = (data['ssid']?.toString().trim().isNotEmpty ?? false) ? data['ssid'].toString().trim() : targetSsid;
         targetPass = data['pass']?.toString() ?? targetPass;
         force = data['force'] == true;
         autoApproved = data['autoApproved'] == true || data['autoApproved']?.toString() == '1';
       }
     } catch (_) {}
+
+    if (action == 'signal') {
+      try {
+        final signal = await _wifiChannel.invokeMethod<String>('getSignal') ?? '';
+        await _controller.runJavaScript('window.updateWifiSignal(${jsonEncode(signal)});');
+      } catch (_) {}
+      return;
+    }
 
     String currentSsid = '';
     try {
@@ -130,7 +164,9 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
       currentSsid = '';
     }
 
-    if (_sameSsid(currentSsid, targetSsid)) {
+    if (currentSsid == '__WIFI_DISABLED__') {
+      currentSsid = 'وای‌فای خاموش است';
+    } else if (_sameSsid(currentSsid, targetSsid)) {
       if (force) await _showAlreadyOnBoardWifiDialog(targetSsid);
       return;
     }
@@ -243,6 +279,8 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> {
         }
         await Future<void>.delayed(const Duration(seconds: 5));
         await _controller.runJavaScript('fetchStatus(); loadSettings();');
+      } else if (status == 'wifi_disabled') {
+        _showSnack('وای‌فای گوشی خاموش است. صفحه وای‌فای باز شد؛ وای‌فای را روشن کنید، سپس دوباره اتصال را بزنید.', isError: true);
       } else if (status == 'permission_requested') {
         _showSnack('گوشی اجازه دسترسی WiFi/موقعیت مکانی را می‌خواهد. اجازه را تأیید کنید؛ اپ چند ثانیه دیگر دوباره تلاش می‌کند.');
         if (retry < 2) {
