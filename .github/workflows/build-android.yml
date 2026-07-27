@@ -29,6 +29,26 @@ jobs:
           rm -rf android
           flutter create --platforms=android .
 
+      - name: Apply custom Android launcher icon
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          src = Path('assets/app_icon/android_res')
+          dst = Path('android/app/src/main/res')
+          if not src.exists():
+              raise SystemExit('Icon source folder not found: assets/app_icon/android_res')
+          for item in src.iterdir():
+              target = dst / item.name
+              if item.is_dir():
+                  target.mkdir(parents=True, exist_ok=True)
+                  for f in item.iterdir():
+                      shutil.copy2(f, target / f.name)
+              else:
+                  shutil.copy2(item, target / item.name)
+          print('Custom launcher icon applied.')
+          PY
+
       - name: Allow ESP32 local HTTP and WiFi assist permissions on Android
         run: |
           python3 - <<'PY'

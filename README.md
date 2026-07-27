@@ -75,6 +75,17 @@ POST /save-ap-cycle
 
 ## Flutter Android App
 
+### آیکون برنامه
+
+آیکون استاندارد Android هم آماده و داخل پروژه قرار داده شده است:
+
+```text
+android_app_flutter/assets/app_icon/ic_launcher_master_1024.png
+android_app_flutter/assets/app_icon/android_res/...
+```
+
+GitHub Actions هنگام build آن را داخل `android/app/src/main/res` کپی می‌کند، پس APK با همین آیکون ساخته می‌شود.
+
 ### اگر هیچ چیزی روی کامپیوتر نصب ندارید
 
 بله، می‌توانید با GitHub Actions فایل APK را داخل خود GitHub بسازید. من workflow آماده را اضافه کرده‌ام:

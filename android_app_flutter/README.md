@@ -2,6 +2,24 @@
 
 این نسخه عمداً UI را به صورت WebView ساخته است تا ظاهر پنل دقیقاً شبیه وب‌پنل قبلی بماند. HTML/CSS/SVG/JS داخل خود اپ قرار دارد و ESP32 فقط API JSON می‌دهد.
 
+## آیکون برنامه
+
+آیکون استاندارد Android ساخته و داخل پروژه قرار داده شده است:
+
+```text
+assets/app_icon/ic_launcher_master_1024.png
+assets/app_icon/ic_launcher_foreground_master_1024.png
+assets/app_icon/android_res/...
+```
+
+Workflow موقع build این آیکون‌ها را بعد از `flutter create` داخل مسیر زیر کپی می‌کند:
+
+```text
+android/app/src/main/res
+```
+
+بنابراین APK خروجی با همین آیکون ساخته می‌شود.
+
 ## ساخت APK در GitHub بدون نصب Flutter
 
 این پوشه workflow آماده دارد:
