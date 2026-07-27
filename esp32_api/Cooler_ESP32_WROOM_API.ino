@@ -1893,7 +1893,8 @@ void handleFactoryReset() {
   JsonVariantConst payload = verifiedPayload(doc, payloadOk);
   if (!payloadOk) return;
 
-  const char* code = payload["code"] | payload["password"] | "";
+  const char* code = payload["code"] | "";
+  if (strlen(code) == 0) code = payload["password"] | "";
   if (String(code) != String(FACTORY_RESET_CODE)) {
     sendJsonMessage(403, "error", "Invalid reset code");
     return;
