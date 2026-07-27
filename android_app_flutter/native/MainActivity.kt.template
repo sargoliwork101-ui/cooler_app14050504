@@ -73,13 +73,13 @@ class MainActivity: FlutterActivity() {
     private fun getSignalInfo(): String {
         return try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            if (!wifiManager.isWifiEnabled) return "وای‌فای خاموش"
+            if (!wifiManager.isWifiEnabled) return "سیگنال 0/10"
             val rssi = wifiManager.connectionInfo?.rssi ?: -127
-            if (rssi <= -120) return "سیگنال نامشخص"
-            val level = WifiManager.calculateSignalLevel(rssi, 4) + 1
-            "سیگنال $level/4 (${rssi}dBm)"
+            if (rssi <= -120) return "سیگنال 0/10"
+            val level = WifiManager.calculateSignalLevel(rssi, 11).coerceIn(0, 10)
+            "سیگنال $level/10"
         } catch (e: Exception) {
-            "سیگنال نامشخص"
+            "سیگنال 0/10"
         }
     }
 

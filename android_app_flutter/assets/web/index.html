@@ -277,7 +277,11 @@
     <p id="progress-text">لطفاً منتظر بمانید، اطلاعات روی حافظه بورد نوشته می‌شود.</p>
     <div class="progress-track"><div id="progress-bar-fill"></div></div>
     <div id="progress-percent">0%</div>
-    <button id="operation-close-btn" class="btn-alert-close" style="display:none;margin-top:18px;" onclick="closeOperationModal(true)">بستن</button>
+    <div id="operation-action-row" style="display:none;margin-top:18px;gap:8px;justify-content:center;">
+      <button id="operation-retry-btn" class="btn-alert-close" style="background:var(--accent);color:var(--on-accent);" onclick="retryActiveOperation()">تلاش دوباره</button>
+      <button id="operation-cancel-btn" class="btn-alert-close" style="background:var(--panel-2);color:var(--text-dim);border:1px solid var(--line-strong);" onclick="cancelActiveOperation()">لغو درخواست</button>
+      <button id="operation-close-btn" class="btn-alert-close" style="display:none;" onclick="closeOperationModal(true)">بستن</button>
+    </div>
   </div>
 
   <div class="phone col">
@@ -425,6 +429,7 @@ let everConnected = false;
 let wifiSignalText = "";
 const CONNECTION_FAIL_THRESHOLD = 10;
 let activeOperation = null;
+let activeOperationTimer = null;
 let waitingWifiReboot = false, wifiWasDisconnected = false;
 
 function normalizeBaseUrl(v){ v=(v||'').trim(); if(!/^https?:\/\//i.test(v)) v='http://'+v; return v.replace(/\/+$/,''); }
@@ -433,37 +438,68 @@ function apiFetch(path, opts){ return fetch(apiUrl(path), opts); }
 function fnv1aChecksum(str){ let h=0x811c9dc5; const bytes=new TextEncoder().encode(str); for(let i=0;i<bytes.length;i++){ h^=bytes[i]; h=Math.imul(h,0x01000193)>>>0; } return h.toString(16).padStart(8,'0'); }
 function postJson(path, body){ const payload=(body==null?{}:body); const serialized=JSON.stringify(payload); const envelope={payload:payload,checksum:fnv1aChecksum(serialized)}; return apiFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope)}); }
 function showOperationModal(title,text,state){
-  const modal=document.getElementById('progress-modal'), overlay=document.getElementById('custom-alert-overlay'), fill=document.getElementById('progress-bar-fill'), pct=document.getElementById('progress-percent'), titleEl=document.getElementById('progress-title'), textEl=document.getElementById('progress-text'), closeBtn=document.getElementById('operation-close-btn');
+  const modal=document.getElementById('progress-modal'), overlay=document.getElementById('custom-alert-overlay'), fill=document.getElementById('progress-bar-fill'), pct=document.getElementById('progress-percent'), titleEl=document.getElementById('progress-title'), textEl=document.getElementById('progress-text'), actionRow=document.getElementById('operation-action-row'), retryBtn=document.getElementById('operation-retry-btn'), cancelBtn=document.getElementById('operation-cancel-btn'), closeBtn=document.getElementById('operation-close-btn');
   titleEl.innerText=title||'در حال انجام عملیات...';
   textEl.innerText=text||'';
   overlay.style.display='block'; modal.style.display='block';
+  actionRow.style.display=(state==='error'||state==='timeout')?'flex':'none';
+  retryBtn.style.display=(state==='timeout')?'inline-block':'none';
+  cancelBtn.style.display=(state==='timeout')?'inline-block':'none';
   closeBtn.style.display=(state==='error')?'inline-block':'none';
   let percent=20;
-  if(state==='queued') percent=25; else if(state==='sending') percent=65; else if(state==='success') percent=100; else if(state==='error') percent=100;
+  if(state==='queued') percent=25; else if(state==='sending') percent=65; else if(state==='success') percent=100; else if(state==='error'||state==='timeout') percent=100;
   fill.style.width=percent+'%'; pct.innerText=percent+'%';
-  fill.style.background=(state==='error')?'linear-gradient(90deg,var(--off),var(--warn))':'linear-gradient(90deg,var(--accent),var(--cyan))';
-  titleEl.style.color=(state==='error')?'var(--off)':(state==='success'?'var(--accent)':'var(--accent)');
+  fill.style.background=(state==='error'||state==='timeout')?'linear-gradient(90deg,var(--off),var(--warn))':'linear-gradient(90deg,var(--accent),var(--cyan))';
+  titleEl.style.color=(state==='error'||state==='timeout')?'var(--off)':(state==='success'?'var(--accent)':'var(--accent)');
+}
+function clearOperationTimer(){ if(activeOperationTimer){ clearTimeout(activeOperationTimer); activeOperationTimer=null; } }
+function startOperationTimer(){
+  clearOperationTimer();
+  activeOperationTimer=setTimeout(()=>{
+    if(!activeOperation) return;
+    activeOperation.timedOut=true;
+    activeOperation.inFlight=false;
+    showOperationModal(activeOperation.title,'ارتباط با برد تا ۶۰ ثانیه برقرار نشد. درخواست هنوز انجام نشده است. می‌توانید دوباره تلاش کنید یا درخواست را لغو کنید.','timeout');
+  },60000);
 }
 function updateOperationModal(text,state,title){ if(!activeOperation && state!=='error') return; showOperationModal(title||(activeOperation?activeOperation.title:'عملیات'),text,state); }
 function closeOperationModal(force){
   if(activeOperation && !force) return;
+  clearOperationTimer();
   document.getElementById('progress-modal').style.display='none';
   document.getElementById('custom-alert-overlay').style.display='none';
-  const closeBtn=document.getElementById('operation-close-btn'); if(closeBtn) closeBtn.style.display='none';
+  const actionRow=document.getElementById('operation-action-row'); if(actionRow) actionRow.style.display='none';
   if(force) activeOperation=null;
+}
+function cancelActiveOperation(){
+  if(!activeOperation) { closeOperationModal(true); return; }
+  clearOperationTimer();
+  activeOperation=null;
+  showOperationModal('درخواست لغو شد','درخواست انجام نشد و از حالت انتظار خارج شد.','error');
+  setTimeout(()=>closeOperationModal(true),1800);
+}
+function retryActiveOperation(){
+  if(!activeOperation) return;
+  activeOperation.timedOut=false;
+  activeOperation.inFlight=false;
+  showOperationModal(activeOperation.title,'در حال تلاش دوباره برای ارتباط با برد...','queued');
+  startOperationTimer();
+  trySendActiveOperation();
+  fetchStatus();
 }
 function runBoardOperation(op){
   if(activeOperation){
     showOperationModal(activeOperation.title,'یک عملیات دیگر در حال انجام است. لطفاً تا پایان آن صبر کنید.','queued');
     return false;
   }
-  activeOperation=Object.assign({inFlight:false},op);
+  activeOperation=Object.assign({inFlight:false,timedOut:false},op);
   showOperationModal(op.title,'در حال ارسال درخواست به برد...','sending');
+  startOperationTimer();
   trySendActiveOperation();
   return true;
 }
 function trySendActiveOperation(){
-  if(!activeOperation || activeOperation.inFlight) return;
+  if(!activeOperation || activeOperation.inFlight || activeOperation.timedOut) return;
   const op=activeOperation;
   op.inFlight=true;
   showOperationModal(op.title,'در حال انجام عملیات روی برد...','sending');
@@ -474,14 +510,16 @@ function trySendActiveOperation(){
     const doneOp=activeOperation;
     if(!doneOp) return;
     doneOp.inFlight=false;
+    clearOperationTimer();
     showOperationModal(doneOp.title,doneOp.successMessage||'عملیات با موفقیت انجام شد.','success');
     try{ if(doneOp.onSuccess) doneOp.onSuccess(data); }catch(e){}
     activeOperation=null;
     setTimeout(()=>closeOperationModal(true), doneOp.closeDelay||1800);
   }).catch(err=>{
-    if(!activeOperation) return;
+    if(!activeOperation || activeOperation.timedOut) return;
     activeOperation.inFlight=false;
     if(err && err.server){
+      clearOperationTimer();
       showOperationModal(activeOperation.title,activeOperation.errorMessage||'عملیات انجام نشد. برد پاسخ خطا داد.','error');
       activeOperation=null;
     } else {
