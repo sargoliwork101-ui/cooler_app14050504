@@ -3,7 +3,7 @@
 فایل اصلی:
 
 ```text
-Cooler_ESP32_WROOM_API.ino
+esp32_api.ino
 ```
 
 این نسخه مخصوص ESP32 است و برای استفاده از قابلیت‌های بومی ESP32 نگه‌داری می‌شود:
@@ -12,6 +12,12 @@ Cooler_ESP32_WROOM_API.ino
 - Watchdog رسمی ESP32 (`esp_task_wdt`)
 - AES بومی/mbedTLS برای رمزنگاری رمزهای AP/STA
 - توان CPU و RAM بیشتر نسبت به ESP8266
+- اجرای چندوظیفه‌ای واقعی با FreeRTOS taskها:
+  - `api` برای WebServer/API
+  - `control` برای ساعت، رله و سناریوها
+  - `network` برای STA/AP/NTP
+  - `maintenance` برای ذخیره‌های دوره‌ای، RAM check و refreshهای ایمنی
+- محافظت از state مشترک با mutex برای کاهش race condition بین taskها
 - API JSON بدون HTML/CSS/JS داخلی
 
 ## API مشترک با اپ Android

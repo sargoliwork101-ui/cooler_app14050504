@@ -10,6 +10,9 @@
   #include <WiFi.h>
   #include <WebServer.h>
   #include <esp_task_wdt.h>
+  #include <freertos/FreeRTOS.h>
+  #include <freertos/task.h>
+  #include <freertos/semphr.h>
   #include "mbedtls/aes.h"
 
 // ============================================================
@@ -289,6 +292,35 @@ void connectToInternetWiFi();
 void tryNtpSync();
 String encryptPassword(const char* password, size_t bufferSize);
 void loadAndDecryptPassword(const char* savedValue, char* outputBuffer, size_t bufferSize);
+
+// FreeRTOS task/mutex layer مخصوص ESP32.
+void lockState();
+void unlockState();
+void runLockedHandler(void (*handler)());
+void startFreeRtosTasks();
+void taskApi(void* parameter);
+void taskControl(void* parameter);
+void taskNetwork(void* parameter);
+void taskMaintenance(void* parameter);
+
+
+// Mutex مشترک وضعیت سیستم: همه handlerهای API و taskهای کنترلی قبل از دسترسی به state مشترک
+// آن را می‌گیرند تا در FreeRTOS race condition روی سناریوها، رله، ساعت، WiFi و آمار رخ ندهد.
+SemaphoreHandle_t stateMutex = NULL;
+
+void lockState() {
+  if (stateMutex != NULL) xSemaphoreTake(stateMutex, portMAX_DELAY);
+}
+
+void unlockState() {
+  if (stateMutex != NULL) xSemaphoreGive(stateMutex);
+}
+
+void runLockedHandler(void (*handler)()) {
+  lockState();
+  handler();
+  unlockState();
+}
 
 // بررسی با تفاضل unsigned long برای سازگاری با سرریز millis().
 // پاسخ 429 به مرورگر برمی‌گردد و هیچ تغییری در رله یا فایل‌ها انجام نمی‌شود.
@@ -590,7 +622,12 @@ void setup() {
   Serial.begin(115200);
   
   // فعال‌سازی واچ‌داگ مخصوص ESP32 با تایم‌اوت ۸ ثانیه
-  setupWatchdog(); 
+  setupWatchdog();
+  stateMutex = xSemaphoreCreateMutex();
+  if (stateMutex == NULL) {
+    Serial.println("State mutex allocation failed! Restarting...");
+    ESP.restart();
+  }
 
   // راه‌اندازی حافظه داخلی سیستم
   if (!LittleFS.begin(true)) {
@@ -650,8 +687,8 @@ void setup() {
   connectToInternetWiFi();
 
   // تعریف کنترل‌کننده‌های وب‌سرور
-  server.on("/", HTTP_GET, handleApiRoot);
-  server.on("/settings", HTTP_GET, handleGetSettings);
+  server.on("/", HTTP_GET, [](){ runLockedHandler(handleApiRoot); });
+  server.on("/settings", HTTP_GET, [](){ runLockedHandler(handleGetSettings); });
   server.on("/save", HTTP_OPTIONS, handleCorsOptions);
   server.on("/sync", HTTP_OPTIONS, handleCorsOptions);
   server.on("/toggle-manual", HTTP_OPTIONS, handleCorsOptions);
@@ -660,15 +697,15 @@ void setup() {
   server.on("/save-protection", HTTP_OPTIONS, handleCorsOptions);
   server.on("/save-ap-cycle", HTTP_OPTIONS, handleCorsOptions);
   server.on("/factory-reset", HTTP_OPTIONS, handleCorsOptions);
-  server.on("/save", HTTP_POST, handleSaveScenario);
-  server.on("/sync", HTTP_POST, handleSyncTime);
-  server.on("/status", HTTP_GET, handleGetStatus);
-  server.on("/toggle-manual", HTTP_POST, handleToggleManual);
-  server.on("/save-ap", HTTP_POST, handleSaveAP);
-  server.on("/save-sta", HTTP_POST, handleSaveSTA);
-  server.on("/save-protection", HTTP_POST, handleSaveProtection);
-  server.on("/save-ap-cycle", HTTP_POST, handleSaveApCycle);
-  server.on("/factory-reset", HTTP_POST, handleFactoryReset);
+  server.on("/save", HTTP_POST, [](){ runLockedHandler(handleSaveScenario); });
+  server.on("/sync", HTTP_POST, [](){ runLockedHandler(handleSyncTime); });
+  server.on("/status", HTTP_GET, [](){ runLockedHandler(handleGetStatus); });
+  server.on("/toggle-manual", HTTP_POST, [](){ runLockedHandler(handleToggleManual); });
+  server.on("/save-ap", HTTP_POST, [](){ runLockedHandler(handleSaveAP); });
+  server.on("/save-sta", HTTP_POST, [](){ runLockedHandler(handleSaveSTA); });
+  server.on("/save-protection", HTTP_POST, [](){ runLockedHandler(handleSaveProtection); });
+  server.on("/save-ap-cycle", HTTP_POST, [](){ runLockedHandler(handleSaveApCycle); });
+  server.on("/factory-reset", HTTP_POST, [](){ runLockedHandler(handleFactoryReset); });
 
   server.onNotFound([](){
     if (server.method() == HTTP_OPTIONS) {
@@ -681,38 +718,72 @@ void setup() {
   server.begin();
   lastTick = millis();
   lastTimeSaveMillis = millis();
+  startFreeRtosTasks();
 }
 
 void loop() {
+  // در ESP32 برنامه اصلی در چند task FreeRTOS اجرا می‌شود.
+  // loop فقط Watchdog مربوط به Arduino loop task را تغذیه می‌کند و CPU را آزاد می‌گذارد.
   feedWatchdog();
+  vTaskDelay(pdMS_TO_TICKS(1000));
+}
 
-  // ============================================================
-  //  زمان‌بندی چندوظیفه‌ای سبک و قابل‌حمل برای ESP32 و ESP8266
-  // ============================================================
-  // ESP8266-01 تک‌هسته‌ای است و FreeRTOS واقعی ندارد؛ بنابراین «مولتی‌ترد واقعی» روی هر دو برد
-  // به شکل یکسان ممکن نیست. برای اینکه رفتار روی ESP32 و ESP8266 یکی بماند، کارها به taskهای
-  // کوتاه و غیرمسدودکننده تقسیم شده‌اند تا وب‌سرور، ساعت، رله، NTP و چرخه‌های WiFi همزمان و روان‌تر
-  // جلو بروند. روی ESP32 هم این روش عمداً حفظ شده تا منطق مشترک بماند و race condition ایجاد نشود.
+// راه‌اندازی taskهای FreeRTOS مخصوص ESP32.
+void startFreeRtosTasks() {
+  xTaskCreatePinnedToCore(taskApi,         "api",         8192, NULL, 4, NULL, 0);
+  xTaskCreatePinnedToCore(taskControl,     "control",     4096, NULL, 5, NULL, 1);
+  xTaskCreatePinnedToCore(taskNetwork,     "network",     4096, NULL, 3, NULL, 0);
+  xTaskCreatePinnedToCore(taskMaintenance, "maintenance", 4096, NULL, 2, NULL, 1);
+}
 
-  const unsigned long now = millis();
-
-  // وب‌سرور باید در هر دور loop سرویس بگیرد تا API کند نشود.
-  server.handleClient();
-
-  // ساعت داخلی همچنان با while جبران عقب‌افتادگی می‌کند و باید خیلی مکرر اجرا شود.
-  updateClock();
-
-  // مدیریت ریستارت نرم‌افزاری امن
-  if (pendingReset && (now - resetMillis > 2000UL)) {
-    if (!pendingFactoryReset) saveTimeSetting();
-    ESP.restart();
+void taskApi(void* parameter) {
+  esp_task_wdt_add(NULL);
+  for (;;) {
+    server.handleClient();
+    feedWatchdog();
+    vTaskDelay(pdMS_TO_TICKS(2));
   }
+}
 
-  // بررسی کمبود RAM، اما نه در هر میکروثانیه؛ هر ۱ ثانیه کافی است و روی ESP8266 هم فشار کمتر دارد.
-  static unsigned long lastHeapCheck = 0;
-  static int lowHeapStreak = 0;
-  if (now - lastHeapCheck >= 1000UL) {
-    lastHeapCheck = now;
+void taskControl(void* parameter) {
+  esp_task_wdt_add(NULL);
+  unsigned long lastScenarioTask = 0;
+  for (;;) {
+    lockState();
+    updateClock();
+    unsigned long now = millis();
+    if (now - lastScenarioTask >= 200UL) {
+      lastScenarioTask = now;
+      checkScenarios();
+    }
+    unlockState();
+    feedWatchdog();
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+void taskNetwork(void* parameter) {
+  esp_task_wdt_add(NULL);
+  for (;;) {
+    lockState();
+    manageStaCycle();
+    tryNtpSync();
+    manageApCycle();
+    unlockState();
+    feedWatchdog();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+void taskMaintenance(void* parameter) {
+  esp_task_wdt_add(NULL);
+  int lowHeapStreak = 0;
+  unsigned long lastTxPowerRefresh = 0;
+  unsigned long lastPinModeRefresh = 0;
+  for (;;) {
+    unsigned long now = millis();
+    lockState();
+
     if (ESP.getFreeHeap() < 2000) {
       lowHeapStreak++;
       if (lowHeapStreak >= 5) {
@@ -723,57 +794,41 @@ void loop() {
     } else {
       lowHeapStreak = 0;
     }
-  }
 
-  // سناریوها و رله: رزولوشن برنامه دقیقه‌ای است؛ ۲۰۰ms کاملاً کافی و بسیار سبک‌تر از هر loop است.
-  static unsigned long lastScenarioTask = 0;
-  if (now - lastScenarioTask >= 200UL) {
-    lastScenarioTask = now;
-    checkScenarios();
-  }
-
-  // کارهای WiFi/NTP/AP دوره‌ای هستند و لازم نیست در هر loop اجرا شوند.
-  static unsigned long lastNetworkTask = 0;
-  if (now - lastNetworkTask >= 1000UL) {
-    lastNetworkTask = now;
-    manageStaCycle();
-    tryNtpSync();
-    manageApCycle();
-  }
-
-  // ذخیره پشتیبان دوره‌ای زمان.
-  if (time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
-    saveTimeSetting();
-  }
-
-  // ذخیره پیشرفت دوره‌ی جاری «روشن بودن» رله.
-  if (relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
-    unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
-    if (elapsedSec > 0) {
-      addRelayOnSecondsSafely(elapsedSec);
-      relayOnSinceMillis = millis();
-    } else {
-      relayOnSinceMillis = millis();
+    if (pendingReset && (now - resetMillis > 2000UL)) {
+      if (!pendingFactoryReset) saveTimeSetting();
+      ESP.restart();
     }
-    saveRelayStats();
-  }
 
-  // محافظت در برابر بازنشانی خاموش/بی‌صدای قدرت سیگنال توسط استک وای‌فای.
-  static unsigned long lastTxPowerRefresh = 0;
-  if (now - lastTxPowerRefresh >= 30000UL) {
-    applyApTxPower();
-    lastTxPowerRefresh = now;
-  }
+    if (time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
+      saveTimeSetting();
+    }
 
-  // محافظت اضافه در برابر نویز رله (EMI): جهت پین رله هر ۳۰ ثانیه refresh می‌شود.
-  static unsigned long lastPinModeRefresh = 0;
-  if (now - lastPinModeRefresh >= 30000UL) {
-    pinMode(RELAY_PIN, OUTPUT);
-    lastPinModeRefresh = now;
-  }
+    if (relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
+      unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
+      if (elapsedSec > 0) {
+        addRelayOnSecondsSafely(elapsedSec);
+        relayOnSinceMillis = millis();
+      } else {
+        relayOnSinceMillis = millis();
+      }
+      saveRelayStats();
+    }
 
-  // در ESP8266 این yield برای WiFi stack حیاتی است؛ در ESP32 هم بی‌ضرر است.
-  yield();
+    if (now - lastTxPowerRefresh >= 30000UL) {
+      applyApTxPower();
+      lastTxPowerRefresh = now;
+    }
+
+    if (now - lastPinModeRefresh >= 30000UL) {
+      pinMode(RELAY_PIN, OUTPUT);
+      lastPinModeRefresh = now;
+    }
+
+    unlockState();
+    feedWatchdog();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
 
 void updateClock() {

@@ -2,8 +2,8 @@
 
 این بسته شامل خروجی‌های زیر است:
 
-- `esp32_api/Cooler_ESP32_WROOM_API.ino` — فریمور اختصاصی ESP32، بهینه‌شده برای قابلیت‌های بومی ESP32 مثل mbedTLS AES و Watchdog رسمی ESP32.
-- `esp8266_api/Cooler_ESP8266_01_API.ino` — فریمور اختصاصی ESP8266/ESP-01، بهینه‌شده برای محدودیت‌های RAM/CPU و کتابخانه‌های بومی ESP8266 مثل ESP8266WebServer و BearSSL.
+- `esp32_api/esp32_api.ino` — فریمور اختصاصی ESP32، بهینه‌شده برای قابلیت‌های بومی ESP32 مثل mbedTLS AES و Watchdog رسمی ESP32.
+- `esp8266_api/esp8266_api.ino` — فریمور اختصاصی ESP8266/ESP-01، بهینه‌شده برای محدودیت‌های RAM/CPU و کتابخانه‌های بومی ESP8266 مثل ESP8266WebServer و BearSSL.
 - `android_app_flutter/` — اپ Flutter WebView برای Android که همان HTML/CSS/SVG/JS پنل قبلی را داخل خود اپ اجرا می‌کند تا ظاهر تا حد ممکن دقیقاً مشابه وب‌پنل اصلی باشد.
 
 ## Firmwareها
@@ -11,13 +11,13 @@
 برای ESP32 این فایل را در Arduino IDE باز کنید:
 
 ```text
-esp32_api/Cooler_ESP32_WROOM_API.ino
+esp32_api/esp32_api.ino
 ```
 
 برای ESP8266/ESP-01 این فایل را باز کنید:
 
 ```text
-esp8266_api/Cooler_ESP8266_01_API.ino
+esp8266_api/esp8266_api.ino
 ```
 
 اپ Android نیازی ندارد نوع برد را بداند، چون API هر دو firmware یکسان است.
