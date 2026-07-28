@@ -435,7 +435,8 @@ let waitingWifiReboot = false, wifiWasDisconnected = false;
 function normalizeBaseUrl(v){ v=(v||'').trim(); if(!/^https?:\/\//i.test(v)) v='http://'+v; return v.replace(/\/+$/,''); }
 function apiUrl(path){ return normalizeBaseUrl(apiBase)+path; }
 function apiFetch(path, opts){ return fetch(apiUrl(path), opts); }
-function fnv1aChecksum(str){ let h=0x811c9dc5; const bytes=new TextEncoder().encode(str); for(let i=0;i<bytes.length;i++){ h^=bytes[i]; h=Math.imul(h,0x01000193)>>>0; } return h.toString(16).padStart(8,'0'); }
+function utf8Bytes(str){ if(window.TextEncoder){ return new TextEncoder().encode(str); } const enc=unescape(encodeURIComponent(str)); const arr=new Uint8Array(enc.length); for(let i=0;i<enc.length;i++) arr[i]=enc.charCodeAt(i); return arr; }
+function fnv1aChecksum(str){ let h=0x811c9dc5; const bytes=utf8Bytes(str); for(let i=0;i<bytes.length;i++){ h^=bytes[i]; h=Math.imul(h,0x01000193)>>>0; } return h.toString(16).padStart(8,'0'); }
 function postJson(path, body){ const payload=(body==null?{}:body); const serialized=JSON.stringify(payload); const envelope={payload:payload,checksum:fnv1aChecksum(serialized)}; return apiFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope)}); }
 function showOperationModal(title,text,state){
   const modal=document.getElementById('progress-modal'), overlay=document.getElementById('custom-alert-overlay'), fill=document.getElementById('progress-bar-fill'), pct=document.getElementById('progress-percent'), titleEl=document.getElementById('progress-title'), textEl=document.getElementById('progress-text'), actionRow=document.getElementById('operation-action-row'), retryBtn=document.getElementById('operation-retry-btn'), cancelBtn=document.getElementById('operation-cancel-btn'), closeBtn=document.getElementById('operation-close-btn');
@@ -503,7 +504,10 @@ function trySendActiveOperation(){
   const op=activeOperation;
   op.inFlight=true;
   showOperationModal(op.title,'در حال انجام عملیات روی برد...','sending');
-  postJson(op.path,op.payload||{}).then(async r=>{
+  let requestPromise;
+  try { requestPromise = postJson(op.path,op.payload||{}); }
+  catch(e) { requestPromise = Promise.reject(e); }
+  requestPromise.then(async r=>{
     if(!r.ok){ let t=''; try{t=await r.text();}catch(e){} throw {server:true,message:t||('HTTP '+r.status)}; }
     try{return await r.json();}catch(e){return {};}
   }).then(data=>{

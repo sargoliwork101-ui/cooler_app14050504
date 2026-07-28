@@ -1,30 +1,36 @@
 # ESP32 Smart Cooler — REST API + Flutter Android App
 
-این بسته شامل دو خروجی اصلی است:
+این بسته شامل خروجی‌های زیر است:
 
-- `esp32_api/Cooler_ESP32_WROOM_API.ino` — نسخه refactor شده ESP32 بدون HTML/CSS/JS داخلی و فقط با REST API مبتنی بر JSON.
+- `esp32_api/Cooler_ESP32_WROOM_API.ino` — فریمور اختصاصی ESP32، بهینه‌شده برای قابلیت‌های بومی ESP32 مثل mbedTLS AES و Watchdog رسمی ESP32.
+- `esp8266_api/Cooler_ESP8266_01_API.ino` — فریمور اختصاصی ESP8266/ESP-01، بهینه‌شده برای محدودیت‌های RAM/CPU و کتابخانه‌های بومی ESP8266 مثل ESP8266WebServer و BearSSL.
 - `android_app_flutter/` — اپ Flutter WebView برای Android که همان HTML/CSS/SVG/JS پنل قبلی را داخل خود اپ اجرا می‌کند تا ظاهر تا حد ممکن دقیقاً مشابه وب‌پنل اصلی باشد.
 
-## ESP32
+## Firmwareها
 
-فایل `Cooler_ESP32_WROOM_API.ino` را در Arduino IDE باز کنید و کتابخانه‌های قبلی پروژه را نصب نگه دارید:
+برای ESP32 این فایل را در Arduino IDE باز کنید:
 
-- WiFi
-- WebServer
+```text
+esp32_api/Cooler_ESP32_WROOM_API.ino
+```
+
+برای ESP8266/ESP-01 این فایل را باز کنید:
+
+```text
+esp8266_api/Cooler_ESP8266_01_API.ino
+```
+
+اپ Android نیازی ندارد نوع برد را بداند، چون API هر دو firmware یکسان است.
+
+کتابخانه‌های مورد نیاز کلی:
+
+- WiFi / WebServer مخصوص همان پلتفرم
 - LittleFS
 - ArduinoJson
-- ESP32 Arduino Core
-- mbedTLS داخلی ESP32
+- ESP32 Arduino Core یا ESP8266 Arduino Core
+- mbedTLS داخلی ESP32 یا BearSSL داخلی ESP8266 برای AES
 
-در این نسخه `#include "webpage.h"` حذف شده و هیچ HTML/CSS/JS روی ESP32 تولید نمی‌شود. منطق‌های اصلی دست‌نخورده نگه داشته شده‌اند:
-
-- NTP: `tryNtpSync`, `updateClock`
-- اجرای سناریوها: `checkScenarios`
-- محافظت ضد روشن/خاموش سریع کمپرسور
-- LittleFS و ذخیره‌سازی Round-Robin زمان/آمار
-- Watchdog
-- رمزنگاری AES رمزها قبل از ذخیره در LittleFS
-- مدیریت چرخه AP/STA و قدرت سیگنال
+در هر دو firmware، `webpage.h` و HTML/CSS/JS داخلی حذف شده و برد فقط REST API JSON ارائه می‌دهد.
 
 ## REST API
 

@@ -1,25 +1,16 @@
 // ============================================================
-//  Smart Cooler REST API — Multi-board edition
-//  پشتیبانی همزمان با ESP32 و ESP8266/ESP-01 با کمترین تغییر در منطق اصلی.
+//  Smart Cooler REST API — ESP8266/ESP-01 optimized edition
+//  نسخه اختصاصی ESP8266/ESP-01 با ESP8266WebServer، Watchdog داخلی و AES سازگار BearSSL.
 // ============================================================
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <time.h>
 
-#if defined(ESP32)
-  #include <WiFi.h>
-  #include <WebServer.h>
-  #include <esp_task_wdt.h>
-  #include "mbedtls/aes.h"
-#elif defined(ESP8266)
   #include <ESP8266WiFi.h>
   #include <ESP8266WebServer.h>
   #include <bearssl/bearssl.h>
   typedef ESP8266WebServer WebServer;
-#else
-  #error "This firmware supports only ESP32 or ESP8266."
-#endif
 
 // ============================================================
 //  بخش تنظیمات و ثابت‌ها
@@ -29,24 +20,19 @@
 
 // نام برنامه — در تب مرورگر و نوار بالای پنل نمایش داده می‌شود.
 // اگر خواستید نام دستگاه را عوض کنید، فقط این مقدار را تغییر دهید.
-const char* PROGRAM_NAME    = "کولر هوشمند ESP32";
+const char* PROGRAM_NAME    = "کولر هوشمند ESP8266";
 
 // زیرنویس/برند کوچک زیر نام برنامه در نوار بالا (مثلاً مدل برد).
-const char* PROGRAM_TAGLINE = "ESP32 · TIMER HUB";
+const char* PROGRAM_TAGLINE = "ESP8266 · TIMER HUB";
 
 // پایه (پین) خروجی متصل به رله روی برد ESP32-WROOM.
 // GPIO23 یک پایه امن برای خروجی است. اگر رله روی پایه دیگری وصل است، فقط این عدد را تغییر دهید.
 // نکته: GPIO3 (پایه RX0 سریال) برای رله پیشنهاد نمی‌شود.
-#if defined(ESP8266)
 // ESP8266-01 فقط GPIO0 و GPIO2 را واقعاً در دسترس دارد. GPIO2 برای رله معمولاً امن‌تر است،
 // اما باید هنگام بوت HIGH بماند. برای اغلب رله‌های Active-Low، LOW یعنی روشن و HIGH زمان بوت یعنی خاموش.
 // اگر سخت‌افزار شما Active-High است، RELAY_ACTIVE_LEVEL را به HIGH تغییر دهید.
 const int  RELAY_PIN = 2;
 const int  RELAY_ACTIVE_LEVEL = LOW;
-#else
-const int  RELAY_PIN = 23;
-const int  RELAY_ACTIVE_LEVEL = HIGH;
-#endif
 
 // اختلاف زمان محلی با UTC بر حسب ثانیه. مقدار فعلی UTC+03:30 (ایران) است.
 // برای مناطق دیگر فقط این عدد را تغییر دهید (مثلاً UTC+03:30 = 12600).
@@ -290,6 +276,7 @@ void handleSaveApCycle();
 void handleFactoryReset();
 bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs);
 void sendJsonMessage(int code, const char* status, const char* message);
+void handleCorsOptions();
 bool parseJsonBody(JsonDocument &doc);
 String fnv1aChecksum(const String &data);
 JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok);
@@ -323,29 +310,11 @@ bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs) {
 // در ESP32 باید از Task Watchdog رسمی خود ESP-IDF استفاده کنیم.
 
 void setupWatchdog() {
-#if defined(ESP32)
-  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-    esp_task_wdt_config_t twdt_config = {
-      .timeout_ms = WDT_TIMEOUT_SEC * 1000,
-      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
-      .trigger_panic = true
-    };
-    esp_task_wdt_init(&twdt_config);
-  #else
-    esp_task_wdt_init(WDT_TIMEOUT_SEC, true);
-  #endif
-  esp_task_wdt_add(NULL);
-#elif defined(ESP8266)
   ESP.wdtEnable(WDT_TIMEOUT_SEC * 1000);
-#endif
 }
 
 void feedWatchdog() {
-#if defined(ESP32)
-  esp_task_wdt_reset();
-#elif defined(ESP8266)
   ESP.wdtFeed();
-#endif
 }
 // ============================================================
 
@@ -362,6 +331,14 @@ void sendJsonMessage(int code, const char* status, const char* message) {
   server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
   server.send(code, "application/json", out);
+}
+
+void handleCorsOptions() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type, X-Requested-With");
+  server.sendHeader("Access-Control-Max-Age", "86400");
+  server.send(204);
 }
 
 // خواندن بدنه JSON. همه درخواست‌های تغییردهنده باید application/json و body معتبر داشته باشند.
@@ -431,19 +408,6 @@ void setRelay(bool state) {
 // نکته مهم: در ESP32 این تنظیم روی کل رادیو اعمال می‌شود (هم AP هم STA)، چون فقط یک رادیوی
 // فیزیکی مشترک وجود دارد؛ تفکیک جداگانه‌ی توان برای AP و STA در سخت‌افزار ESP32 ممکن نیست.
 void applyApTxPower() {
-#if defined(ESP32)
-  wifi_power_t p;
-  switch (apTxPowerLevel) {
-    case 0:  p = WIFI_POWER_5dBm;    break;
-    case 1:  p = WIFI_POWER_11dBm;   break;
-    case 2:  p = WIFI_POWER_15dBm;   break;
-    default: p = WIFI_POWER_19_5dBm; break;
-  }
-  WiFi.setTxPower(p);
-  Serial.print("TX Power set to level "); Serial.print(apTxPowerLevel);
-  Serial.print(" -> requested="); Serial.print((int)p);
-  Serial.print(" actual="); Serial.println((int)WiFi.getTxPower());
-#elif defined(ESP8266)
   float dbm;
   switch (apTxPowerLevel) {
     case 0:  dbm = 5.0f;  break;
@@ -454,7 +418,6 @@ void applyApTxPower() {
   WiFi.setOutputPower(dbm);
   Serial.print("TX Power set to level "); Serial.print(apTxPowerLevel);
   Serial.print(" -> "); Serial.print(dbm); Serial.println(" dBm");
-#endif
 }
 
 // روشن/خاموش کردن واقعی رادیوی AP. خاموش کردن با پارامتر true به softAPdisconnect باعث می‌شود
@@ -512,13 +475,6 @@ void manageApCycle() {
 // رمزنگاری/رمزگشایی یک بلوک ۱۶ بایتی AES-128 به صورت ECB.
 // ESP32: mbedTLS. ESP8266: BearSSL. خروجی هر دو یکسان است تا فرمت ENC:HEX حفظ شود.
 void aesEncryptBlock16(const unsigned char* input, unsigned char* output) {
-#if defined(ESP32)
-  mbedtls_aes_context aes;
-  mbedtls_aes_init(&aes);
-  mbedtls_aes_setkey_enc(&aes, AES_KEY, 128);
-  mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, input, output);
-  mbedtls_aes_free(&aes);
-#elif defined(ESP8266)
   // در ESP8266 بعضی نسخه‌های BearSSL توابع داخلی br_aes_big_keysched/br_aes_big_encrypt
   // را public نمی‌کنند. برای سازگاری با Arduino-ESP8266 Core از API عمومی CBC استفاده می‌کنیم.
   // چون هر بار فقط یک بلوک ۱۶ بایتی با IV صفر پردازش می‌شود، خروجی دقیقاً معادل ECB است.
@@ -527,24 +483,15 @@ void aesEncryptBlock16(const unsigned char* input, unsigned char* output) {
   br_aes_big_cbcenc_keys ctx;
   br_aes_big_cbcenc_init(&ctx, AES_KEY, 16);
   br_aes_big_cbcenc_run(&ctx, iv, output, 16);
-#endif
 }
 
 void aesDecryptBlock16(const unsigned char* input, unsigned char* output) {
-#if defined(ESP32)
-  mbedtls_aes_context aes;
-  mbedtls_aes_init(&aes);
-  mbedtls_aes_setkey_dec(&aes, AES_KEY, 128);
-  mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_DECRYPT, input, output);
-  mbedtls_aes_free(&aes);
-#elif defined(ESP8266)
   // معادل ECB decrypt با CBC decrypt روی یک بلوک و IV صفر.
   memcpy(output, input, 16);
   unsigned char iv[16] = {0};
   br_aes_big_cbcdec_keys ctx;
   br_aes_big_cbcdec_init(&ctx, AES_KEY, 16);
   br_aes_big_cbcdec_run(&ctx, iv, output, 16);
-#endif
 }
 
 // این تابع متن ساده رمز را می‌گیرد و به یک رشته رمزگذاری‌شده (تبدیل شده به هگز) برمی‌گرداند.
@@ -642,17 +589,11 @@ void setup() {
   setupWatchdog(); 
 
   // راه‌اندازی حافظه داخلی سیستم
-#if defined(ESP32)
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS Mount Failed even after formatting!");
-  }
-#elif defined(ESP8266)
   if (!LittleFS.begin()) {
     Serial.println("LittleFS Mount Failed. Formatting...");
     LittleFS.format();
     if (!LittleFS.begin()) Serial.println("LittleFS Mount Failed even after formatting!");
   }
-#endif
 
   // لود کردن تنظیمات ذخیره شده
   loadScenarios();
@@ -709,6 +650,14 @@ void setup() {
   // تعریف کنترل‌کننده‌های وب‌سرور
   server.on("/", HTTP_GET, handleApiRoot);
   server.on("/settings", HTTP_GET, handleGetSettings);
+  server.on("/save", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/sync", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/toggle-manual", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-ap", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-sta", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-protection", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-ap-cycle", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/factory-reset", HTTP_OPTIONS, handleCorsOptions);
   server.on("/save", HTTP_POST, handleSaveScenario);
   server.on("/sync", HTTP_POST, handleSyncTime);
   server.on("/status", HTTP_GET, handleGetStatus);
@@ -721,10 +670,7 @@ void setup() {
 
   server.onNotFound([](){
     if (server.method() == HTTP_OPTIONS) {
-      server.sendHeader("Access-Control-Allow-Origin", "*");
-      server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-      server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
-      server.send(204);
+      handleCorsOptions();
       return;
     }
     sendJsonMessage(404, "error", "Endpoint not found");

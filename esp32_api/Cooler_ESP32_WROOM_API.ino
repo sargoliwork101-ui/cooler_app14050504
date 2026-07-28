@@ -1,10 +1,16 @@
-#include <WiFi.h>
-#include <WebServer.h>
-#include <LittleFS.h>
+// ============================================================
+//  Smart Cooler REST API — ESP32 optimized edition
+//  نسخه اختصاصی ESP32 با استفاده از WebServer، Watchdog رسمی ESP32 و AES بومی mbedTLS.
+// ============================================================
+#include <Arduino.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #include <time.h>
-#include <esp_task_wdt.h>
-#include "mbedtls/aes.h" // کتابخانه بومی و شتاب‌دهی شده سخت‌افزاری ESP32 برای رمزنگاری متقارن AES
+
+  #include <WiFi.h>
+  #include <WebServer.h>
+  #include <esp_task_wdt.h>
+  #include "mbedtls/aes.h"
 
 // ============================================================
 //  بخش تنظیمات و ثابت‌ها
@@ -23,9 +29,6 @@ const char* PROGRAM_TAGLINE = "ESP32 · TIMER HUB";
 // GPIO23 یک پایه امن برای خروجی است. اگر رله روی پایه دیگری وصل است، فقط این عدد را تغییر دهید.
 // نکته: GPIO3 (پایه RX0 سریال) برای رله پیشنهاد نمی‌شود.
 const int  RELAY_PIN = 23;
-
-// سطح منطقی که رله را روشن می‌کند:
-// رله با فرمان HIGH روشن می‌شود → HIGH  /  با فرمان LOW روشن می‌شود (Active-Low) → LOW
 const int  RELAY_ACTIVE_LEVEL = HIGH;
 
 // اختلاف زمان محلی با UTC بر حسب ثانیه. مقدار فعلی UTC+03:30 (ایران) است.
@@ -270,6 +273,7 @@ void handleSaveApCycle();
 void handleFactoryReset();
 bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs);
 void sendJsonMessage(int code, const char* status, const char* message);
+void handleCorsOptions();
 bool parseJsonBody(JsonDocument &doc);
 String fnv1aChecksum(const String &data);
 JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok);
@@ -303,25 +307,24 @@ bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs) {
 // در ESP32 باید از Task Watchdog رسمی خود ESP-IDF استفاده کنیم.
 
 void setupWatchdog() {
-#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  // سازگار با Arduino-ESP32 Core نسخه 3 به بعد
-  esp_task_wdt_config_t twdt_config = {
-    .timeout_ms = WDT_TIMEOUT_SEC * 1000,
-    .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
-    .trigger_panic = true
-  };
-  esp_task_wdt_init(&twdt_config);
-#else
-  // سازگار با Arduino-ESP32 Core نسخه 2.x
-  esp_task_wdt_init(WDT_TIMEOUT_SEC, true);
-#endif
-  esp_task_wdt_add(NULL); // اضافه کردن loop task فعلی به Watchdog
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    esp_task_wdt_config_t twdt_config = {
+      .timeout_ms = WDT_TIMEOUT_SEC * 1000,
+      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,
+      .trigger_panic = true
+    };
+    esp_task_wdt_init(&twdt_config);
+  #else
+    esp_task_wdt_init(WDT_TIMEOUT_SEC, true);
+  #endif
+  esp_task_wdt_add(NULL);
 }
 
 void feedWatchdog() {
   esp_task_wdt_reset();
 }
 // ============================================================
+
 
 // ارسال پاسخ استاندارد JSON برای همه endpointها
 void sendJsonMessage(int code, const char* status, const char* message) {
@@ -335,6 +338,14 @@ void sendJsonMessage(int code, const char* status, const char* message) {
   server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
   server.send(code, "application/json", out);
+}
+
+void handleCorsOptions() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type, X-Requested-With");
+  server.sendHeader("Access-Control-Max-Age", "86400");
+  server.send(204);
 }
 
 // خواندن بدنه JSON. همه درخواست‌های تغییردهنده باید application/json و body معتبر داشته باشند.
@@ -406,14 +417,12 @@ void setRelay(bool state) {
 void applyApTxPower() {
   wifi_power_t p;
   switch (apTxPowerLevel) {
-    case 0:  p = WIFI_POWER_5dBm;   break; // کم — کمترین مصرف و گرما، برد کوتاه‌تر
-    case 1:  p = WIFI_POWER_11dBm;  break; // متوسط
-    case 2:  p = WIFI_POWER_15dBm;  break; // زیاد
-    default: p = WIFI_POWER_19_5dBm; break; // حداکثر — همان مقدار پیش‌فرض قبلی برنامه
+    case 0:  p = WIFI_POWER_5dBm;    break;
+    case 1:  p = WIFI_POWER_11dBm;   break;
+    case 2:  p = WIFI_POWER_15dBm;   break;
+    default: p = WIFI_POWER_19_5dBm; break;
   }
   WiFi.setTxPower(p);
-  // برای تشخیص مشکل احتمالی سخت‌افزار/کتابخانه: اگر واقعاً اعمال شده باشد، مقدار خوانده‌شده باید
-  // با p یکسان باشد. اگر متفاوت بود یعنی چیزی (مثلاً یک اتصال STA در حال انجام) آن را نادیده گرفته.
   Serial.print("TX Power set to level "); Serial.print(apTxPowerLevel);
   Serial.print(" -> requested="); Serial.print((int)p);
   Serial.print(" actual="); Serial.println((int)WiFi.getTxPower());
@@ -471,19 +480,32 @@ void manageApCycle() {
 //  توابع رمزنگاری سخت‌افزاری (AES) مختص ESP32
 // ============================================================
 
-// این تابع متن ساده رمز را می‌گیرد و به یک رشته رمزگذاری‌شده (تبدیل شده به هگز) برمی‌گرداند.
-String encryptPassword(const char* password, size_t bufferSize) {
-  if (strlen(password) == 0) return ""; // اگر پسورد خالی بود، چیزی رمزنگاری نمی‌شود
-
+// رمزنگاری/رمزگشایی یک بلوک ۱۶ بایتی AES-128 به صورت ECB.
+// ESP32: mbedTLS. ESP8266: BearSSL. خروجی هر دو یکسان است تا فرمت ENC:HEX حفظ شود.
+void aesEncryptBlock16(const unsigned char* input, unsigned char* output) {
   mbedtls_aes_context aes;
   mbedtls_aes_init(&aes);
   mbedtls_aes_setkey_enc(&aes, AES_KEY, 128);
+  mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, input, output);
+  mbedtls_aes_free(&aes);
+}
 
-  // محاسبه سایز بافر به مضرب ۱۶ (مورد نیاز الگوریتم AES)
+void aesDecryptBlock16(const unsigned char* input, unsigned char* output) {
+  mbedtls_aes_context aes;
+  mbedtls_aes_init(&aes);
+  mbedtls_aes_setkey_dec(&aes, AES_KEY, 128);
+  mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_DECRYPT, input, output);
+  mbedtls_aes_free(&aes);
+}
+
+// این تابع متن ساده رمز را می‌گیرد و به یک رشته رمزگذاری‌شده (تبدیل شده به هگز) برمی‌گرداند.
+String encryptPassword(const char* password, size_t bufferSize) {
+  if (strlen(password) == 0) return "";
+
   size_t paddedSize = (bufferSize + 15) / 16 * 16;
   unsigned char* input = (unsigned char*)calloc(paddedSize, 1);
   if (!input) return "";
-  strncpy((char*)input, password, bufferSize - 1); // کپی رمز بدون سرریز حافظه
+  strncpy((char*)input, password, bufferSize - 1);
 
   unsigned char* output = (unsigned char*)calloc(paddedSize, 1);
   if (!output) {
@@ -491,21 +513,19 @@ String encryptPassword(const char* password, size_t bufferSize) {
     return "";
   }
 
-  // رمزنگاری بلوک به بلوک (هر بلوک ۱۶ بایت)
   for (size_t i = 0; i < paddedSize; i += 16) {
-    mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, input + i, output + i);
+    aesEncryptBlock16(input + i, output + i);
+    feedWatchdog();
   }
-  mbedtls_aes_free(&aes);
 
-  // تبدیل بایت‌های رمزگذاری‌شده به رشته قابل ذخیره (HEX)
-  // پیشوند ENC: مشخص می‌کند که این رشته رمزنگاری شده است
   String hexString = "ENC:";
+  hexString.reserve(4 + paddedSize * 2);
   for (size_t i = 0; i < paddedSize; i++) {
     char hex[3];
     sprintf(hex, "%02x", output[i]);
     hexString += String(hex);
   }
-  
+
   free(input);
   free(output);
   return hexString;
@@ -515,55 +535,51 @@ String encryptPassword(const char* password, size_t bufferSize) {
 // اگر تنظیمات از قبل (نسخه قدیمی) به صورت متن ساده ذخیره شده باشد، هوشمندانه آن را می‌فهمد.
 void loadAndDecryptPassword(const char* savedValue, char* outputBuffer, size_t bufferSize) {
   String val = String(savedValue);
-  
+
   if (val.length() == 0) {
     outputBuffer[0] = '\0';
     return;
   }
 
-  // بررسی اینکه آیا اطلاعات رمزنگاری شده است؟
   if (val.startsWith("ENC:")) {
     String hexString = val.substring(4);
     size_t len = hexString.length();
-    
-    // اعتبارسنجی طول رشته
-    if (len % 32 != 0) return; 
+    if (len % 32 != 0) {
+      outputBuffer[0] = '\0';
+      return;
+    }
 
     size_t paddedSize = len / 2;
     unsigned char* input = (unsigned char*)calloc(paddedSize, 1);
-    if (!input) return;
+    if (!input) {
+      outputBuffer[0] = '\0';
+      return;
+    }
 
-    // تبدیل رشته HEX به بایت برای پردازش رمزگشایی
     for (size_t i = 0; i < paddedSize; i++) {
       char hex[3] = {hexString[i * 2], hexString[i * 2 + 1], '\0'};
       input[i] = (unsigned char)strtol(hex, NULL, 16);
     }
 
-    mbedtls_aes_context aes;
-    mbedtls_aes_init(&aes);
-    mbedtls_aes_setkey_dec(&aes, AES_KEY, 128);
-
     unsigned char* output = (unsigned char*)calloc(paddedSize, 1);
     if (!output) {
       free(input);
+      outputBuffer[0] = '\0';
       return;
     }
 
-    // رمزگشایی بلوک به بلوک
     for (size_t i = 0; i < paddedSize; i += 16) {
-      mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_DECRYPT, input + i, output + i);
+      aesDecryptBlock16(input + i, output + i);
+      feedWatchdog();
     }
-    mbedtls_aes_free(&aes);
 
-    // کپی داده‌های رمزگشایی شده داخل متغیر هدف در برنامه
     size_t copySize = paddedSize < bufferSize ? paddedSize : bufferSize - 1;
     memcpy(outputBuffer, output, copySize);
     outputBuffer[copySize] = '\0';
-    
+
     free(input);
     free(output);
   } else {
-    // مقدار ساده است (فایل از قبل با فرمت قدیمی روی برد ذخیره شده بوده)
     strncpy(outputBuffer, savedValue, bufferSize - 1);
     outputBuffer[bufferSize - 1] = '\0';
   }
@@ -576,8 +592,7 @@ void setup() {
   // فعال‌سازی واچ‌داگ مخصوص ESP32 با تایم‌اوت ۸ ثانیه
   setupWatchdog(); 
 
-  // راه‌اندازی حافظه داخلی سیستم 
-  // در ESP32 با پارامتر true اگر LittleFS برای اولین بار mount نشود، خودکار فرمت می‌شود
+  // راه‌اندازی حافظه داخلی سیستم
   if (!LittleFS.begin(true)) {
     Serial.println("LittleFS Mount Failed even after formatting!");
   }
@@ -637,6 +652,14 @@ void setup() {
   // تعریف کنترل‌کننده‌های وب‌سرور
   server.on("/", HTTP_GET, handleApiRoot);
   server.on("/settings", HTTP_GET, handleGetSettings);
+  server.on("/save", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/sync", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/toggle-manual", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-ap", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-sta", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-protection", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/save-ap-cycle", HTTP_OPTIONS, handleCorsOptions);
+  server.on("/factory-reset", HTTP_OPTIONS, handleCorsOptions);
   server.on("/save", HTTP_POST, handleSaveScenario);
   server.on("/sync", HTTP_POST, handleSyncTime);
   server.on("/status", HTTP_GET, handleGetStatus);
@@ -649,10 +672,7 @@ void setup() {
 
   server.onNotFound([](){
     if (server.method() == HTTP_OPTIONS) {
-      server.sendHeader("Access-Control-Allow-Origin", "*");
-      server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-      server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
-      server.send(204);
+      handleCorsOptions();
       return;
     }
     sendJsonMessage(404, "error", "Endpoint not found");
@@ -664,46 +684,70 @@ void setup() {
 }
 
 void loop() {
-  feedWatchdog(); // تغذیه واچ‌داگ مخصوص ESP32
-  
-  // واچ‌داگ نرم‌افزاری برای بررسی سلامت رم (برای جلوگیری از هنگ کردن کامل تحت تداخل نویز)
-  // یک افت لحظه‌ای و گذرای حافظه (مثلاً وسط پردازش یک درخواست وب) طبیعی است؛
-  // فقط وقتی چند بار پیاپی زیر آستانه بمانیم، یعنی واقعاً نشتی/کمبود داریم و باید ری‌استارت کنیم.
-  static int lowHeapStreak = 0;
-  if (ESP.getFreeHeap() < 2000) {
-    lowHeapStreak++;
-    if (lowHeapStreak >= 5) {
-      Serial.println("Memory too low! Restarting safely to prevent freeze.");
-      saveTimeSetting();
-      ESP.restart();
-    }
-  } else {
-    lowHeapStreak = 0;
-  }
+  feedWatchdog();
 
-  // مدیریت ریستارت نرم‌افزاری امن 
-  if (pendingReset && (millis() - resetMillis > 2000)) {
+  // ============================================================
+  //  زمان‌بندی چندوظیفه‌ای سبک و قابل‌حمل برای ESP32 و ESP8266
+  // ============================================================
+  // ESP8266-01 تک‌هسته‌ای است و FreeRTOS واقعی ندارد؛ بنابراین «مولتی‌ترد واقعی» روی هر دو برد
+  // به شکل یکسان ممکن نیست. برای اینکه رفتار روی ESP32 و ESP8266 یکی بماند، کارها به taskهای
+  // کوتاه و غیرمسدودکننده تقسیم شده‌اند تا وب‌سرور، ساعت، رله، NTP و چرخه‌های WiFi همزمان و روان‌تر
+  // جلو بروند. روی ESP32 هم این روش عمداً حفظ شده تا منطق مشترک بماند و race condition ایجاد نشود.
+
+  const unsigned long now = millis();
+
+  // وب‌سرور باید در هر دور loop سرویس بگیرد تا API کند نشود.
+  server.handleClient();
+
+  // ساعت داخلی همچنان با while جبران عقب‌افتادگی می‌کند و باید خیلی مکرر اجرا شود.
+  updateClock();
+
+  // مدیریت ریستارت نرم‌افزاری امن
+  if (pendingReset && (now - resetMillis > 2000UL)) {
     if (!pendingFactoryReset) saveTimeSetting();
     ESP.restart();
   }
 
-  server.handleClient();
-  updateClock();
-  manageStaCycle();  // مدیریت دوره‌ای قطع/وصل اتصال مودم اینترنت (STA)
-  tryNtpSync();      // گرفتن ساعت از اینترنت در صورت وصل بودن به مودم، بدون نیاز به گوشی
-  checkScenarios();
-  manageApCycle();   // مدیریت چرخه‌ی دوره‌ای روشن/خاموش AP (برای کاهش دما و تابش دائمی)
+  // بررسی کمبود RAM، اما نه در هر میکروثانیه؛ هر ۱ ثانیه کافی است و روی ESP8266 هم فشار کمتر دارد.
+  static unsigned long lastHeapCheck = 0;
+  static int lowHeapStreak = 0;
+  if (now - lastHeapCheck >= 1000UL) {
+    lastHeapCheck = now;
+    if (ESP.getFreeHeap() < 2000) {
+      lowHeapStreak++;
+      if (lowHeapStreak >= 5) {
+        Serial.println("Memory too low! Restarting safely to prevent freeze.");
+        saveTimeSetting();
+        ESP.restart();
+      }
+    } else {
+      lowHeapStreak = 0;
+    }
+  }
 
-  // ذخیره پشتیبان دوره‌ای زمان (هر ۵ دقیقه یک‌بار) تا در صورت قطعی برق ناگهانی،
-  // حداکثر چند دقیقه از ساعت عقب بمانیم. این کار جدا از ذخیره فوری قبل از هر فرمان قطع/وصل رله است.
-  if (time_synchronized && (millis() - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
+  // سناریوها و رله: رزولوشن برنامه دقیقه‌ای است؛ ۲۰۰ms کاملاً کافی و بسیار سبک‌تر از هر loop است.
+  static unsigned long lastScenarioTask = 0;
+  if (now - lastScenarioTask >= 200UL) {
+    lastScenarioTask = now;
+    checkScenarios();
+  }
+
+  // کارهای WiFi/NTP/AP دوره‌ای هستند و لازم نیست در هر loop اجرا شوند.
+  static unsigned long lastNetworkTask = 0;
+  if (now - lastNetworkTask >= 1000UL) {
+    lastNetworkTask = now;
+    manageStaCycle();
+    tryNtpSync();
+    manageApCycle();
+  }
+
+  // ذخیره پشتیبان دوره‌ای زمان.
+  if (time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
     saveTimeSetting();
   }
 
-  // ذخیره پیشرفت دوره‌ی جاری «روشن بودن» رله (هر همان فاصله TIME_SAVE_INTERVAL) تا اگر کمپرسور مدت
-  // طولانی روشن بماند و درست وسط آن برق قطع شود، حداکثر همین چند دقیقه از مدت‌کارکرد از دست برود.
-  // نقطه‌ی شروع دوره جلو کشیده می‌شود تا هنگام محاسبه بعدی، مدت قبلاً ذخیره‌شده دوباره شمارش نشود.
-  if (relayCurrentlyOnForStats && (millis() - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
+  // ذخیره پیشرفت دوره‌ی جاری «روشن بودن» رله.
+  if (relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
     unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
     if (elapsedSec > 0) {
       addRelayOnSecondsSafely(elapsedSec);
@@ -714,28 +758,22 @@ void loop() {
     saveRelayStats();
   }
 
-  // --- محافظت اضافه در برابر بازنشانی خاموش/بی‌صدای قدرت سیگنال توسط استک وای‌فای ---
-  // دقیقاً مشابه تکنیک بازنشانی pinMode رله در ادامه: هر ۳۰ ثانیه یک‌بار سطح قدرت سیگنال انتخابی
-  // کاربر دوباره روی رادیو اعمال می‌شود، چون برخی رویدادهای داخلی وای‌فای (اتصال/قطع STA، اسکن و...)
-  // می‌توانند بی‌سروصدا این مقدار را به پیش‌فرض (حداکثر) برگردانند.
+  // محافظت در برابر بازنشانی خاموش/بی‌صدای قدرت سیگنال توسط استک وای‌فای.
   static unsigned long lastTxPowerRefresh = 0;
-  if (millis() - lastTxPowerRefresh >= 30000UL) {
+  if (now - lastTxPowerRefresh >= 30000UL) {
     applyApTxPower();
-    lastTxPowerRefresh = millis();
+    lastTxPowerRefresh = now;
   }
 
-  // --- محافظت اضافه در برابر نویز رله (EMI) ---
-  // هر ۳۰ ثانیه یک‌بار، جهت پین رله (OUTPUT) دوباره تنظیم می‌شود. نویز شدید ناشی از قطع/وصل
-  // رله مجاور در موارد نادر می‌تواند حتی رجیستر پیکربندی جهت پین (نه فقط مقدار خروجی) را دستکاری کند؛
-  // این کار هزینه‌ی تقریباً صفر دارد و تضمین می‌کند پین همیشه به‌عنوان خروجی باقی بماند.
+  // محافظت اضافه در برابر نویز رله (EMI): جهت پین رله هر ۳۰ ثانیه refresh می‌شود.
   static unsigned long lastPinModeRefresh = 0;
-  if (millis() - lastPinModeRefresh >= 30000UL) {
+  if (now - lastPinModeRefresh >= 30000UL) {
     pinMode(RELAY_PIN, OUTPUT);
-    lastPinModeRefresh = millis();
+    lastPinModeRefresh = now;
   }
-  
-  // جایگزین delay(10) برای جلوگیری از مسدود شدن هسته و تنفس بهتر پردازنده و وای‌فای
-  yield(); 
+
+  // در ESP8266 این yield برای WiFi stack حیاتی است؛ در ESP32 هم بی‌ضرر است.
+  yield();
 }
 
 void updateClock() {
@@ -1704,7 +1742,7 @@ void handleGetStatus() {
     if (elapsed < phaseMs) staRemainingSec = (long)((phaseMs - elapsed + 999UL) / 1000UL);
   }
 
-  StaticJsonDocument<2048> doc;
+  DynamicJsonDocument doc(2048);
   doc["status"] = "success";
   doc["time"] = timeStr;
   doc["relay"] = logicalState;
