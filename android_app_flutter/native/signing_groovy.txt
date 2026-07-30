@@ -1,0 +1,10 @@
+
+    signingConfigs {
+        release {
+            storeFile file("../../android_signing/cooler-release.p12")
+            storePassword "Cooler1405!"
+            keyAlias "cooler"
+            keyPassword "Cooler1405!"
+            storeType "pkcs12"
+        }
+    }

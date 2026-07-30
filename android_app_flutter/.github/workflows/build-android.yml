@@ -93,6 +93,36 @@ jobs:
           print(f'Wrote native WiFi MethodChannel to {target}')
           PY
 
+      - name: Configure stable signing and Android version
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = [Path('android/app/build.gradle.kts'), Path('android/app/build.gradle')]
+          found = False
+          for p in files:
+              if not p.exists():
+                  continue
+              found = True
+              s = p.read_text()
+              if p.name.endswith('.kts'):
+                  s = s.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
+                  signing = Path('native/signing_kts.txt').read_text()
+                  if 'create("release")' not in s:
+                      s = s.replace('    buildTypes {', signing + '\n    buildTypes {')
+                  s = s.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
+              else:
+                  s = s.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 36')
+                  signing = Path('native/signing_groovy.txt').read_text()
+                  if 'signingConfigs' not in s:
+                      s = s.replace('    buildTypes {', signing + '\n    buildTypes {')
+                  s = s.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
+              p.write_text(s)
+              print(f'Configured stable signing in {p}')
+          if not found:
+              raise SystemExit('No Android app Gradle file found')
+          PY
+
       - name: Get dependencies
         run: flutter pub get
 
@@ -136,8 +166,10 @@ jobs:
       - name: Analyze source (non-blocking)
         run: flutter analyze || true
 
-      - name: Build release APK
-        run: flutter build apk --release
+      - name: Build signed release APK
+        run: |
+          BUILD_NUMBER=$((GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
+          flutter build apk --release --build-name "1.0.$BUILD_NUMBER" --build-number "$BUILD_NUMBER"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
