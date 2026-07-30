@@ -238,6 +238,26 @@
     .reset-stats-btn{width:100%;padding:14px;border-radius:var(--btn-radius);border:1px solid var(--off);background:var(--off-dim);color:var(--off);font-family:var(--font-fa);font-weight:900;font-size:.92rem;cursor:pointer;box-shadow:4px 4px 10px rgba(0,0,0,.45), -3px -3px 8px rgba(255,255,255,.04);}
     .factory-reset-icon{background:rgba(242,169,59,.14);border-color:var(--warn);color:var(--warn);}
     .factory-reset-btn{border-color:var(--warn);background:var(--warn-dim);color:var(--warn);}
+    .time-picker-value{width:100%;background:transparent;border:none;color:var(--text);font-family:var(--font-mono);font-size:1.02rem;font-weight:700;text-align:center;direction:ltr;cursor:pointer;padding:3px 0;}
+    #time-picker-modal{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(15,18,19,.97);border:1px solid var(--line-strong);border-radius:24px;padding:22px;z-index:10004;box-shadow:0 24px 70px rgba(0,0,0,.72);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);width:92%;max-width:410px;text-align:center;}
+    .tp-title{margin:0 0 8px;color:var(--accent);font-size:1rem;font-weight:900;}
+    .tp-selected{direction:ltr;font-family:var(--font-mono);font-size:2rem;font-weight:900;color:var(--text);letter-spacing:2px;margin-bottom:8px;}
+    .tp-stage{font-size:.78rem;color:var(--text-dim);margin-bottom:10px;}
+    .tp-dial{position:relative;width:286px;height:286px;margin:0 auto 12px;border-radius:50%;background:var(--panel-2);border:1px solid var(--line);box-shadow:inset 6px 6px 14px rgba(0,0,0,.42), inset -4px -4px 10px rgba(255,255,255,.025);}
+    .tp-num{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:.72rem;font-weight:900;color:var(--text-dim);background:rgba(255,255,255,.025);border:1px solid transparent;cursor:pointer;user-select:none;}
+    .tp-num.selected{background:var(--accent);color:var(--on-accent);border-color:var(--accent);box-shadow:0 0 16px var(--accent-dim);}
+    .tp-center-dot{position:absolute;left:50%;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);}
+    .tp-minute-fine{display:none;align-items:center;justify-content:center;gap:12px;margin:2px 0 12px;}
+    .tp-fine-btn{width:40px;height:34px;border-radius:10px;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--accent);font-family:var(--font-fa);font-size:1.2rem;font-weight:900;}
+    .tp-actions{display:flex;gap:8px;margin-top:8px;}
+    .tp-period-row{display:flex;gap:8px;justify-content:center;margin:0 0 12px;direction:ltr;}
+    .tp-period-btn{padding:7px 16px;border-radius:999px;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text-dim);font-family:var(--font-mono);font-weight:800;cursor:pointer;}
+    .tp-period-btn.selected{background:var(--accent);border-color:var(--accent);color:var(--on-accent);}
+    .tp-hand{position:absolute;left:50%;top:50%;width:3px;height:99px;margin-left:-1.5px;margin-top:-99px;background:var(--accent);border-radius:2px;transform-origin:50% 100%;box-shadow:0 0 10px var(--accent-dim);}
+    .tp-hand::after{content:'';position:absolute;top:-8px;left:50%;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent);}
+    .tp-actions button{flex:1;padding:12px;border-radius:12px;border:none;font-family:var(--font-fa);font-weight:900;}
+    .tp-next{background:var(--accent);color:var(--on-accent);}
+    .tp-cancel{background:var(--panel-2);color:var(--text-dim);border:1px solid var(--line-strong)!important;}
     #connection-status{white-space:nowrap;max-width:52vw;overflow:hidden;text-overflow:ellipsis;}
   </style>
 </head>
@@ -270,6 +290,26 @@
     <div class="api-modal-actions">
       <button class="api-save" style="background:var(--off);color:#fff;" onclick="submitFactoryReset()">ریست کامل</button>
       <button class="api-cancel" onclick="closeFactoryResetModal()">انصراف</button>
+    </div>
+  </div>
+
+  <div id="time-picker-modal">
+    <h3 class="tp-title">انتخاب زمان</h3>
+    <div class="tp-selected" id="tp-selected">00:00</div>
+    <div class="tp-stage" id="tp-stage">انتخاب ساعت</div>
+    <div class="tp-period-row" id="tp-period-row">
+      <button class="tp-period-btn" id="tp-am" onclick="setTimePickerPeriod(0)">AM</button>
+      <button class="tp-period-btn" id="tp-pm" onclick="setTimePickerPeriod(1)">PM</button>
+    </div>
+    <div class="tp-dial" id="tp-dial"><div class="tp-hand" id="tp-hand"></div><div class="tp-center-dot"></div></div>
+    <div class="tp-minute-fine" id="tp-minute-fine">
+      <button class="tp-fine-btn" onclick="adjustTimePickerMinute(-1)">−</button>
+      <span style="color:var(--text-dim);font-size:.78rem;">تنظیم دقیقه دقیق</span>
+      <button class="tp-fine-btn" onclick="adjustTimePickerMinute(1)">+</button>
+    </div>
+    <div class="tp-actions">
+      <button class="tp-next" id="tp-next" onclick="timePickerNext()">بعدی: دقیقه</button>
+      <button class="tp-cancel" onclick="closeTimePicker()">انصراف</button>
     </div>
   </div>
 
@@ -560,10 +600,67 @@ function toggleNet(sw){ const cb=document.getElementById('internet-enabled'); cb
 function toggleApCycleSwitch(sw){ const cb=document.getElementById('ap-cycle-enabled'); cb.checked=!cb.checked; sw.classList.toggle('on',cb.checked); }
 function setSwitch(id,on){ const sw=document.getElementById(id); if(sw) sw.classList.toggle('on',!!on); }
 function scenarioListMessage(text, type){ const list=document.getElementById('scenarios-list'); if(!list) return; const color=type==='error'?'var(--off)':(type==='empty'?'var(--text-dim)':'var(--warn)'); const border=type==='error'?'var(--off)':(type==='empty'?'var(--line-strong)':'var(--warn)'); const bg=type==='error'?'var(--off-dim)':(type==='empty'?'var(--panel-2)':'var(--warn-dim)'); list.innerHTML=`<div class='scenario-banner' style='background:${bg};border-color:${border};color:${color};'>${text}</div>`; }
-function renderScenarios(){ const list=document.getElementById('scenarios-list'); if(!list) return; if(settingsLoading || !settingsEverLoaded){ scenarioListMessage('در حال دریافت سناریوها از برد... لطفاً چند لحظه صبر کنید.','loading'); return; } if(scenarios.length===0){ scenarioListMessage('هیچ سناریویی روی برد ذخیره نشده است. برای افزودن برنامه جدید، دکمه + را بزنید.','empty'); return; } list.innerHTML=''; scenarios.sort((a,b)=>(a.sh*60+a.sm)-(b.sh*60+b.sm)); scenarios.forEach((sc,i)=>{ const card=document.createElement('div'); card.className='scenario-card'+(sc.en===false?' scenario-disabled':''); card.id='row_'+i; const switchClass=sc.en===false?'switch':'switch on'; card.innerHTML=`<div class='scenario-top'><div class='scenario-name'>سناریو ${i+1} </div><div class='scenario-actions'><div class='${switchClass}' onclick='toggleScenarioEnabled(${i})'><div class='knob'></div></div><div class='icon-btn danger' onclick='removeScenario(${i})' title='حذف سناریو'>✕</div></div></div><div class='time-row'><div class='time-box'><div class='lbl'>روشن</div><input type='time' value='${pad2(sc.sh)}:${pad2(sc.sm)}' step='60' onchange='updateScenarioTime(${i},true,this.value)'></div><div class='time-box'><div class='lbl'>خاموش</div><input type='time' value='${pad2(sc.eh)}:${pad2(sc.em)}' step='60' onchange='updateScenarioTime(${i},false,this.value)'></div></div><div class='days-label'>روزهای اجرا</div><div class='days-row'></div>`; const days=card.querySelector('.days-row'); ['ش','ی','د','س','چ','پ','ج'].forEach((name,d)=>{ const b=document.createElement('button'); b.type='button'; b.className='day-btn'+((sc.wd&(1<<d))?' selected':''); b.textContent=name; b.onclick=()=>toggleScenarioDay(i,d); days.appendChild(b); }); list.appendChild(card); }); if(!scenarioEditMode) highlightScenarios(currentStatus?currentStatus.time:null,currentStatus?currentStatus.weekday:0); }
+function renderScenarios(){ const list=document.getElementById('scenarios-list'); if(!list) return; if(settingsLoading || !settingsEverLoaded){ scenarioListMessage('در حال دریافت سناریوها از برد... لطفاً چند لحظه صبر کنید.','loading'); return; } if(scenarios.length===0){ scenarioListMessage('هیچ سناریویی روی برد ذخیره نشده است. برای افزودن برنامه جدید، دکمه + را بزنید.','empty'); return; } list.innerHTML=''; scenarios.sort((a,b)=>(a.sh*60+a.sm)-(b.sh*60+b.sm)); scenarios.forEach((sc,i)=>{ const card=document.createElement('div'); card.className='scenario-card'+(sc.en===false?' scenario-disabled':''); card.id='row_'+i; const switchClass=sc.en===false?'switch':'switch on'; card.innerHTML=`<div class='scenario-top'><div class='scenario-name'>سناریو ${i+1} </div><div class='scenario-actions'><div class='${switchClass}' onclick='toggleScenarioEnabled(${i})'><div class='knob'></div></div><div class='icon-btn danger' onclick='removeScenario(${i})' title='حذف سناریو'>✕</div></div></div><div class='time-row'><div class='time-box' onclick='openTimePicker(${i},true)'><div class='lbl'>روشن</div><div class='time-picker-value'>${pad2(sc.sh)}:${pad2(sc.sm)}</div></div><div class='time-box' onclick='openTimePicker(${i},false)'><div class='lbl'>خاموش</div><div class='time-picker-value'>${pad2(sc.eh)}:${pad2(sc.em)}</div></div></div><div class='days-label'>روزهای اجرا</div><div class='days-row'></div>`; const days=card.querySelector('.days-row'); ['ش','ی','د','س','چ','پ','ج'].forEach((name,d)=>{ const b=document.createElement('button'); b.type='button'; b.className='day-btn'+((sc.wd&(1<<d))?' selected':''); b.textContent=name; b.onclick=()=>toggleScenarioDay(i,d); days.appendChild(b); }); list.appendChild(card); }); if(!scenarioEditMode) highlightScenarios(currentStatus?currentStatus.time:null,currentStatus?currentStatus.weekday:0); }
 function addScenario(){ if(settingsLoading){ showModal('در حال دریافت آخرین سناریوها از برد هستیم؛ چند لحظه صبر کنید.'); return; } if(scenarios.length>=20){ showModal('حداکثر ظرفیت مجاز (۲۰ سناریو) را اضافه کرده‌اید.'); return; } scenarios.push({sh:0,sm:0,eh:1,em:0,en:true,wd:127}); renderScenarios(); }
 function removeScenario(i){ scenarios.splice(i,1); renderScenarios(); }
 function updateScenarioTime(i,start,val){ if(!val||!/^\d\d:\d\d$/.test(val)) return; const [h,m]=val.split(':').map(Number); if(start){scenarios[i].sh=h; scenarios[i].sm=m;} else {scenarios[i].eh=h; scenarios[i].em=m;} renderScenarios(); }
+let timePickerState=null;
+function hourToDial(h){ const v=h%12; return v===0?12:v; }
+function dialToHour(v,period){ if(period===0){ return v===12?0:v; } return v===12?12:v+12; }
+function openTimePicker(index,start){
+  if(settingsLoading) return;
+  const sc=scenarios[index]; if(!sc) return;
+  const h=start?sc.sh:sc.eh, m=start?sc.sm:sc.em;
+  timePickerState={index:index,start:!!start,stage:'hour',hour:h,minute:m,period:h>=12?1:0};
+  document.getElementById('custom-alert-overlay').style.display='block';
+  document.getElementById('time-picker-modal').style.display='block';
+  renderTimePickerDial();
+}
+function closeTimePicker(){ document.getElementById('time-picker-modal').style.display='none'; document.getElementById('custom-alert-overlay').style.display='none'; timePickerState=null; }
+function setTimePickerPeriod(period){ const st=timePickerState; if(!st) return; st.period=period; const dialH=hourToDial(st.hour); st.hour=dialToHour(dialH,period); renderTimePickerDial(); }
+function renderTimePickerDial(){
+  const st=timePickerState; if(!st) return;
+  document.getElementById('tp-selected').innerText=pad2(st.hour)+':'+pad2(st.minute);
+  document.getElementById('tp-stage').innerText=st.stage==='hour'?'انتخاب ساعت':'انتخاب دقیقه';
+  document.getElementById('tp-next').innerText=st.stage==='hour'?'بعدی: دقیقه':'تأیید زمان';
+  document.getElementById('tp-minute-fine').style.display=st.stage==='hour'?'none':'flex';
+  document.getElementById('tp-period-row').style.display=st.stage==='hour'?'flex':'none';
+  document.getElementById('tp-am').classList.toggle('selected',st.period===0);
+  document.getElementById('tp-pm').classList.toggle('selected',st.period===1);
+  const dial=document.getElementById('tp-dial'); dial.innerHTML='<div class="tp-hand" id="tp-hand"></div><div class="tp-center-dot"></div>';
+  const radius=124, cx=143, cy=143;
+  const items=[];
+  if(st.stage==='hour'){
+    for(let v=1;v<=12;v++) items.push(v);
+  } else {
+    for(let v=0;v<60;v+=5) items.push(v);
+  }
+  const selectedValue=st.stage==='hour'?hourToDial(st.hour):(Math.round(st.minute/5)*5)%60;
+  const selectedIndex=st.stage==='hour'?(selectedValue%12):(selectedValue/5);
+  const angleDeg=selectedIndex*30;
+  const hand=document.getElementById('tp-hand');
+  hand.style.transform='rotate('+angleDeg+'deg)';
+  items.forEach((value,idx)=>{
+    const angle=(idx/items.length)*Math.PI*2-Math.PI/2;
+    const x=cx+Math.cos(angle)*radius;
+    const y=cy+Math.sin(angle)*radius;
+    const el=document.createElement('div');
+    const selected=(st.stage==='hour')?(hourToDial(st.hour)===value):(((Math.round(st.minute/5)*5)%60)===value);
+    el.className='tp-num '+(selected?'selected':'');
+    el.style.left=x+'px'; el.style.top=y+'px';
+    el.textContent=pad2(value);
+    el.onclick=()=>{ if(st.stage==='hour'){ st.hour=dialToHour(value,st.period); } else { st.minute=value; } renderTimePickerDial(); };
+    dial.appendChild(el);
+  });
+}
+function adjustTimePickerMinute(delta){ const st=timePickerState; if(!st) return; st.minute=(st.minute+delta+60)%60; renderTimePickerDial(); }
+function timePickerNext(){
+  const st=timePickerState; if(!st) return;
+  if(st.stage==='hour'){ st.stage='minute'; renderTimePickerDial(); return; }
+  const sc=scenarios[st.index]; if(!sc) { closeTimePicker(); return; }
+  if(st.start){ sc.sh=st.hour; sc.sm=st.minute; } else { sc.eh=st.hour; sc.em=st.minute; }
+  closeTimePicker(); renderScenarios();
+}
 function toggleScenarioEnabled(i){ scenarios[i].en=!(scenarios[i].en!==false); renderScenarios(); }
 function toggleScenarioDay(i,day){ let mask=scenarios[i].wd||127; const bit=1<<day; if(mask&bit){ if((mask&127)===bit){ showModal('حداقل یک روز برای اجرای سناریو انتخاب کنید.'); return; } mask&=~bit; } else mask|=bit; scenarios[i].wd=mask; renderScenarios(); }
 function scenarioRowsToData(){ return scenarios.map(x=>({sh:x.sh,sm:x.sm,eh:x.eh,em:x.em,en:x.en!==false,wd:x.wd||127})); }
