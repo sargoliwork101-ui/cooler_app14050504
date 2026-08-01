@@ -167,6 +167,11 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> wit
     if (currentSsid == '__WIFI_DISABLED__') {
       currentSsid = 'وای‌فای خاموش است';
     } else if (_sameSsid(currentSsid, targetSsid)) {
+      // گوشی به وای‌فای برد وصله ولی API جواب نمیده — دوباره تلاش کن
+      if (autoApproved && !force) {
+        await _connectToWifi(targetSsid, targetPass, silent: true);
+        return;
+      }
       if (force) await _showAlreadyOnBoardWifiDialog(targetSsid);
       return;
     }
