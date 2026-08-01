@@ -25,7 +25,7 @@ const char* PROGRAM_NAME    = "کولر هوشمند ESP8266";
 // زیرنویس/برند کوچک زیر نام برنامه در نوار بالا (مثلاً مدل برد).
 const char* PROGRAM_TAGLINE = "ESP8266 · TIMER HUB";
 
-// پایه (پین) خروجی متصل به رله روی برد ESP32-WROOM.
+// پایه (پین) خروجی متصل به رله روی برد ESP8266/ESP-01.
 // GPIO23 یک پایه امن برای خروجی است. اگر رله روی پایه دیگری وصل است، فقط این عدد را تغییر دهید.
 // نکته: GPIO3 (پایه RX0 سریال) برای رله پیشنهاد نمی‌شود.
 // ESP8266-01 فقط GPIO0 و GPIO2 را واقعاً در دسترس دارد. GPIO2 برای رله معمولاً امن‌تر است،
@@ -46,7 +46,7 @@ const unsigned char AES_KEY[16] = {
 };
 
 // نام و رمز شبکه Access Point خود دستگاه (برای اتصال مستقیم گوشی به برد).
-// رمز AP طبق قوانین ESP32 باید حداقل ۸ کاراکتر باشد.
+// رمز AP طبق قوانین WiFi باید حداقل ۸ کاراکتر باشد.
 char custom_ssid[32]     = "ESP32_Timer_Hub";
 char custom_password[32] = "12345678";
 
@@ -84,7 +84,7 @@ const int MAX_AP_CYCLE_MINUTES = 1440;
 bool apCurrentlyOn = true;            // وضعیت واقعی فعلی AP (برای مدیریت چرخه)
 unsigned long apCycleLastToggleMillis = 0;
 
-// سطح قدرت سیگنال‌دهی AP/رادیوی وای‌فای برد (روی کل رادیو اعمال می‌شود، چون ESP32 یک تنظیم توان واحد دارد):
+// سطح قدرت سیگنال‌دهی AP/رادیوی وای‌فای برد (روی کل رادیو اعمال می‌شود، چون ESP8266 یک تنظیم توان واحد دارد):
 // 0=کم، 1=متوسط، 2=زیاد، 3=حداکثر (مقدار پیش‌فرض سازنده و رفتار قبلی برنامه)
 int apTxPowerLevel = 3;
 const int MAX_AP_TX_POWER_LEVEL = 3;
@@ -115,7 +115,7 @@ const int OVERRIDE_FILE_VERSION = 2;
 const int PROTECTION_FILE_VERSION = 1;
 const int NTP_META_FILE_VERSION = 1;
 
-// زمان‌سنج (Watchdog) اختصاصی ESP32 به ثانیه — در صورت هنگ کردن برد، خودش ری‌استارت می‌شود.
+// زمان‌سنج (Watchdog) اختصاصی ESP8266 به ثانیه — در صورت هنگ کردن برد، خودش ری‌استارت می‌شود.
 const int WDT_TIMEOUT_SEC = 8;
 
 // فاصله ذخیره پشتیبان دوره‌ای ساعت روی حافظه (برای مقاومت در برابر قطع برق).
@@ -141,7 +141,7 @@ bool pendingFactoryReset = false;
 
 void feedWatchdog();
 
-// ESP32 در این نسخه هیچ HTML/CSS/JS تولید نمی‌کند؛ فقط API JSON ارائه می‌شود.
+// ESP8266 در این نسخه هیچ HTML/CSS/JS تولید نمی‌کند؛ فقط API JSON ارائه می‌شود.
 
 // ساختار هر سناریو
 struct Scenario {
@@ -305,9 +305,9 @@ bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs) {
   return true;
 }
 
-// ================== Watchdog مخصوص ESP32 ==================
+// ================== Watchdog مخصوص ESP8266 ==================
 // در نسخه ESP8266 از ESP.wdtEnable/ESP.wdtFeed استفاده می‌شد؛
-// در ESP32 باید از Task Watchdog رسمی خود ESP-IDF استفاده کنیم.
+// در ESP8266 از ESP.wdtEnable/ESP.wdtFeed استفاده می‌شود.
 
 void setupWatchdog() {
   ESP.wdtEnable(WDT_TIMEOUT_SEC * 1000);
@@ -405,8 +405,8 @@ void setRelay(bool state) {
 // ============================================================
 
 // اعمال سطح قدرت سیگنال انتخاب‌شده روی رادیوی وای‌فای برد.
-// نکته مهم: در ESP32 این تنظیم روی کل رادیو اعمال می‌شود (هم AP هم STA)، چون فقط یک رادیوی
-// فیزیکی مشترک وجود دارد؛ تفکیک جداگانه‌ی توان برای AP و STA در سخت‌افزار ESP32 ممکن نیست.
+// نکته مهم: در ESP8266 این تنظیم روی کل رادیو اعمال می‌شود (هم AP هم STA)، چون فقط یک رادیوی
+// فیزیکی مشترک وجود دارد؛ تفکیک جداگانه‌ی توان برای AP و STA در سخت‌افزار ESP8266 ممکن نیست.
 void applyApTxPower() {
   float dbm;
   switch (apTxPowerLevel) {
@@ -469,7 +469,7 @@ void manageApCycle() {
 }
 
 // ============================================================
-//  توابع رمزنگاری سخت‌افزاری (AES) مختص ESP32
+//  توابع رمزنگاری (AES) مبتنی بر BearSSL مختص ESP8266
 // ============================================================
 
 // رمزنگاری/رمزگشایی یک بلوک ۱۶ بایتی AES-128 به صورت ECB.
@@ -582,10 +582,10 @@ void loadAndDecryptPassword(const char* savedValue, char* outputBuffer, size_t b
 }
 
 void setup() {
-  // راه‌اندازی سریال در ESP32؛ پایه رله از RX0 جدا شده تا تداخل سریال ایجاد نشود
+  // راه‌اندازی سریال در ESP8266؛ پایه رله از RX0 جدا شده تا تداخل سریال ایجاد نشود
   Serial.begin(115200);
   
-  // فعال‌سازی واچ‌داگ مخصوص ESP32 با تایم‌اوت ۸ ثانیه
+  // فعال‌سازی واچ‌داگ مخصوص ESP8266 با تایم‌اوت ۸ ثانیه
   setupWatchdog(); 
 
   // راه‌اندازی حافظه داخلی سیستم
@@ -633,7 +633,7 @@ void setup() {
 
   // راه‌اندازی وای‌فای به صورت همزمان: AP برای اتصال مستقیم گوشی + STA برای اتصال اختیاری به اینترنت
   WiFi.mode(WIFI_AP_STA);
-  WiFi.persistent(false);              // جلوگیری از نوشتن بی‌مورد تنظیمات وای‌فای روی فلش داخلی ESP32
+  WiFi.persistent(false);              // جلوگیری از نوشتن بی‌مورد تنظیمات وای‌فای روی فلش داخلی ESP8266
   WiFi.setAutoReconnect(true);         // در فاز روشنِ STA اگر اتصال به مودم قطع شد، خود برد دوباره تلاش کند
   WiFi.softAP(custom_ssid, custom_password, 1, 0, 3);
   applyApTxPower();      // اعمال سطح قدرت سیگنال ذخیره‌شده (یا پیش‌فرض حداکثر)
@@ -1439,7 +1439,7 @@ void connectToInternetWiFi() {
   // تنظیم ساعت با اولویت سرورهای داخلی ایران و سپس سرور جهانی
   configTime(NTP_GMT_OFFSET_SEC, 0, "ir.pool.ntp.org", "ntp.nic.ir", "pool.ntp.org");
 
-  // نکته مهم: WiFi.begin() در هسته آردوینوی ESP32 می‌تواند به‌صورت داخلی تنظیم قدرت سیگنال رادیو را
+  // نکته مهم: WiFi.begin() در هسته آردوینوی ESP8266 می‌تواند به‌صورت داخلی تنظیم قدرت سیگنال رادیو را
   // به مقدار پیش‌فرض (حداکثر) بازنشانی کند. برای همین بلافاصله بعد از هر تلاش اتصال STA، سطح
   // انتخاب‌شده‌ی کاربر دوباره روی رادیو اعمال می‌شود تا تنظیم «قدرت سیگنال» واقعاً پابرجا بماند.
   applyApTxPower();
@@ -1846,7 +1846,7 @@ void handleSaveAP() {
   saveWiFiSettings();
   saveTimeSetting();
 
-  sendJsonMessage(200, "success", "AP settings saved; ESP32 will restart");
+  sendJsonMessage(200, "success", "AP settings saved; ESP8266 will restart");
   pendingReset = true;
   resetMillis = millis();
 }
