@@ -118,6 +118,14 @@ class MainActivity: FlutterActivity() {
                     super.onAvailable(network)
                     cm.bindProcessToNetwork(network)
                 }
+                override fun onLost(network: Network) {
+                    super.onLost(network)
+                    try { cm.bindProcessToNetwork(null) } catch (_: Exception) {}
+                }
+                override fun onUnavailable() {
+                    super.onUnavailable()
+                    try { cm.bindProcessToNetwork(null) } catch (_: Exception) {}
+                }
             }
             cm.requestNetwork(request, wifiNetworkCallback!!)
             "requested"
