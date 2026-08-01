@@ -497,7 +497,7 @@ let settingsDirty = false;
 let wasDisconnected = false;
 let lastSettingsLoadTime = null;
 let _confirmCallback = null;
-const TABS=['home','scenarios','wifi']; let currentTabIndex=0;
+const TABS=['home','scenarios','wifi']; const RTL=(document.documentElement.dir==='rtl'?-1:1); let currentTabIndex=0;
 let _swipeStartX=0,_swipeStartY=0,_swipeDelta=0,_isSwiping=false,_isScrolling=false;
 let _tpState = null; // {idx, isStart, h, m}
 const _WITEM = 40, _WHALF = 80, _wheelInited = {};
@@ -694,7 +694,7 @@ function closeFactoryResetModal(){ document.getElementById('factory-reset-modal'
 function submitFactoryReset(){ const code=document.getElementById('factory-reset-code').value.trim(); if(code!==String.fromCharCode(49,50,51,52,53,54)){ showToast('رمز ریست کامل اشتباه است.','bad'); return; } showConfirm('این عملیات همه حافظه برد را پاک می‌کند و برد ری‌استارت می‌شود. آیا مطمئن هستید؟',()=>{ runBoardOperation({title:'ریست کامل حافظه برد',path:'/factory-reset',payload:{code:code},successMessage:'حافظه برد پاک شد. برد در حال ری‌استارت است.',closeDelay:2500,onSuccess:()=>{ localStorage.removeItem('esp32ApSsid'); localStorage.removeItem('esp32ApPass'); localStorage.removeItem('esp32WifiAutoApproved'); closeFactoryResetModal(); setTimeout(()=>{fetchStatus(); loadSettings();},5000); }}); }); }
 function togglePasswordVisibility(){ const passInput=document.getElementById('wifi-pass'); const eyeIcon=document.getElementById('eye-icon'); if(!passInput) return; if(passInput.type==='password'){ passInput.type='text'; if(eyeIcon) eyeIcon.innerHTML='<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'; } else { passInput.type='password'; if(eyeIcon) eyeIcon.innerHTML='<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'; } }
 function _doSwitchTab(tabId){ currentTabIndex=TABS.indexOf(tabId); document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active')); document.getElementById('tab-btn-'+tabId).classList.add('active'); updatePagePositions(true); if(tabId==='scenarios'){ scenarioEditMode=true; updateScenariosManualNote(); if(!settingsEverLoaded) loadSettings(); else renderScenarios(); return; } if(scenarioEditMode) scenarioEditMode=false; if(tabId==='wifi' && !settingsEverLoaded) loadSettings(); }
-function updatePagePositions(animate){ const pages=document.querySelectorAll('.page'); pages.forEach((p,i)=>{ const off=i-currentTabIndex; p.style.transition=animate?'transform .35s cubic-bezier(.25,.46,.45,.94)':'none'; p.style.transform='translateX('+off*100+'%)'; p.style.pointerEvents=i===currentTabIndex?'auto':'none'; }); }
+function updatePagePositions(animate){ const pages=document.querySelectorAll('.page'); pages.forEach((p,i)=>{ const off=i-currentTabIndex; p.style.transition=animate?'transform .35s cubic-bezier(.25,.46,.45,.94)':'none'; p.style.transform='translateX('+(RTL*off*100)+'%)'; p.style.pointerEvents=i===currentTabIndex?'auto':'none'; }); }
 function switchTab(tabId){ if(scenarioEditMode && scenariosDirty && tabId!=='scenarios'){ updatePagePositions(true); showConfirm('تغییرات ذخیره‌نشده‌ای در سناریوها دارید. آیا بدون ذخیره کردن تب را عوض می‌کنید؟',()=>{ scenariosDirty=false; _doSwitchTab(tabId); }); return; } if(settingsDirty && tabId!=='wifi'){ updatePagePositions(true); showConfirm('تغییرات ذخیره‌نشده‌ای در تنظیمات دارید. آیا بدون ذخیره کردن تب را عوض می‌کنید؟',()=>{ settingsDirty=false; _doSwitchTab(tabId); }); return; } _doSwitchTab(tabId); }
 function updateScenariosManualNote(){ const note=document.getElementById('manual-disabled-note'); if(note) note.style.display=(currentStatus&&currentStatus.override===1)?'block':'none'; }
 function updateDisconnectedDirtyNote(){ const isDisconnected=connectionFailCount>=CONNECTION_FAIL_THRESHOLD; const dirtyNote=document.getElementById('disconnected-dirty-note'); const note=document.getElementById('disconnected-note'); if(dirtyNote) dirtyNote.style.display=(isDisconnected&&scenariosDirty)?'block':'none'; if(note) note.style.display=(isDisconnected&&!scenariosDirty)?'block':'none'; }
@@ -774,11 +774,11 @@ buildPowerButtons(3); if(localStorage.getItem('esp32WifiAutoApproved')!=='1'){ s
     if(!_isSwiping) return;
     e.preventDefault();
     _swipeDelta=dx;
-    const cw=pagesEl.offsetWidth, pct=(_swipeDelta/cw)*100;
+    const cw=pagesEl.offsetWidth, pct=RTL*(_swipeDelta/cw)*100;
     document.querySelectorAll('.page').forEach((p,i)=>{
       const off=i-currentTabIndex;
       p.style.transition='none';
-      p.style.transform='translateX('+(off*100+pct)+'%)';
+      p.style.transform='translateX('+(RTL*off*100+pct)+'%)';
     });
   }
   function onTE(){
