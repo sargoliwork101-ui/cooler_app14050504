@@ -280,6 +280,7 @@ void handleSaveApCycle();
 void handleFactoryReset();
 bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs);
 void sendJsonMessage(int code, const char* status, const char* message);
+bool rejectIfFactoryResetPending();
 void handleCorsOptions();
 bool parseJsonBody(JsonDocument &doc);
 String fnv1aChecksum(const String &data);
@@ -336,6 +337,12 @@ void sendJsonMessage(int code, const char* status, const char* message) {
   server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
   server.send(code, "application/json", out);
+}
+
+bool rejectIfFactoryResetPending() {
+  if (!pendingFactoryReset) return false;
+  sendJsonMessage(409, "error", "Factory reset is in progress");
+  return true;
 }
 
 void handleCorsOptions() {
@@ -729,7 +736,7 @@ void loop() {
       lowHeapStreak++;
       if (lowHeapStreak >= 5) {
         Serial.println("Memory too low! Restarting safely to prevent freeze.");
-        saveTimeSetting();
+        if (!pendingFactoryReset) saveTimeSetting();
         ESP.restart();
       }
     } else {
@@ -748,18 +755,20 @@ void loop() {
   static unsigned long lastNetworkTask = 0;
   if (now - lastNetworkTask >= 1000UL) {
     lastNetworkTask = now;
-    manageStaCycle();
-    tryNtpSync();
-    manageApCycle();
+    if (!pendingFactoryReset) {
+      manageStaCycle();
+      tryNtpSync();
+      manageApCycle();
+    }
   }
 
   // ذخیره پشتیبان دوره‌ای زمان.
-  if (time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
+  if (!pendingFactoryReset && time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
     saveTimeSetting();
   }
 
   // ذخیره پیشرفت دوره‌ی جاری «روشن بودن» رله.
-  if (relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
+  if (!pendingFactoryReset && relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
     unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
     if (elapsedSec > 0) {
       addRelayOnSecondsSafely(elapsedSec);
@@ -822,6 +831,12 @@ void advanceDate() {
 }
 
 void checkScenarios() {
+  // هنگام Factory Reset هیچ سناریویی نباید دوباره رله را روشن کند.
+  if (pendingFactoryReset) {
+    setRelay(false);
+    return;
+  }
+
   // جلوگیری از ذخیره‌سازی/لاگ بی‌دلیل با کش کردن وضعیت منطقی قبلی
   static int lastKnownState = -1; 
   bool desiredState;
@@ -1587,6 +1602,8 @@ void handleGetSettings() {
 }
 
 void handleSaveScenario() {
+  if (rejectIfFactoryResetPending()) return;
+
   if (!allowRequest(lastSaveScenarioRequest, 1200UL)) return;
 
   DynamicJsonDocument doc(SCENARIOS_JSON_CAPACITY);
@@ -1660,6 +1677,8 @@ void handleSaveScenario() {
 }
 
 void handleSyncTime() {
+  if (rejectIfFactoryResetPending()) return;
+
   if (!allowRequest(lastSyncRequest, 1000UL)) return;
 
   StaticJsonDocument<256> doc;
@@ -1801,6 +1820,8 @@ void handleGetStatus() {
 }
 
 void handleToggleManual() {
+  if (rejectIfFactoryResetPending()) return;
+
   if (!allowRequest(lastToggleManualRequest, 1500UL)) return;
 
   String requestId;
@@ -1863,6 +1884,8 @@ void handleToggleManual() {
 }
 
 void handleSaveAP() {
+  if (rejectIfFactoryResetPending()) return;
+
   if (!allowRequest(lastSaveApRequest, 3000UL)) return;
 
   StaticJsonDocument<320> doc;
@@ -1892,6 +1915,8 @@ void handleSaveAP() {
 }
 
 void handleSaveSTA() {
+  if (rejectIfFactoryResetPending()) return;
+
   if (!allowRequest(lastSaveStaRequest, 1500UL)) return;
 
   StaticJsonDocument<640> doc;
@@ -1941,6 +1966,8 @@ void handleSaveSTA() {
 }
 
 void handleSaveProtection() {
+  if (rejectIfFactoryResetPending()) return;
+
   if (!allowRequest(lastSaveProtectionRequest, 1000UL)) return;
 
   StaticJsonDocument<192> doc;
@@ -1961,6 +1988,11 @@ void handleSaveProtection() {
 }
 
 void handleFactoryReset() {
+  if (pendingFactoryReset) {
+    sendJsonMessage(409, "error", "Factory reset is already in progress");
+    return;
+  }
+
   if (!allowRequest(lastFactoryResetRequest, 5000UL)) return;
 
   StaticJsonDocument<192> doc;
@@ -1976,27 +2008,34 @@ void handleFactoryReset() {
     return;
   }
 
+  // از همین لحظه کنترل سناریو و ذخیره‌های دوره‌ای باید متوقف شوند.
+  pendingFactoryReset = true;
+
   // برای ایمنی، قبل از ریست کامل حافظه رله خاموش و حالت دستی پاک می‌شود.
   manual_override = 0;
   setRelay(false);
   relayCurrentlyOnForStats = false;
+  lastRelayStatState = 0;
+  lastRelayOffMillis = millis();
 
   // ریست کامل حافظه فایل‌سیستم: سناریوها، زمان، آمار، تنظیمات WiFi، محافظت، override و NTP meta.
   bool ok = LittleFS.format();
   if (!ok) {
+    pendingFactoryReset = false;
     sendJsonMessage(500, "error", "LittleFS format failed");
     return;
   }
 
   sendJsonMessage(200, "success", "Factory reset done; restarting");
 
-  // مهم: در loop قبل از ریست دیگر saveTimeSetting انجام نشود، وگرنه پس از format دوباره فایل زمان ساخته می‌شود.
-  pendingFactoryReset = true;
+  // مهم: در loop قبل از ریست دیگر هیچ ذخیره‌ای انجام نمی‌شود، وگرنه پس از format فایل ساخته می‌شود.
   pendingReset = true;
   resetMillis = millis();
 }
 
 void handleSaveApCycle() {
+  if (rejectIfFactoryResetPending()) return;
+
   if (!allowRequest(lastSaveApCycleRequest, 1000UL)) return;
 
   StaticJsonDocument<320> doc;
