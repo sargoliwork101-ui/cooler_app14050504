@@ -201,6 +201,8 @@ bool staEverConnectedThisBoot = false;
 // متغیرهای مدیریت ریستارت غیر بلاک کننده
 unsigned long resetMillis = 0;
 bool pendingReset = false;
+// اگر mount حافظه شکست بخورد، برد بدون format خودکار بالا می‌آید و ذخیره‌سازی خطا می‌دهد.
+bool storageAvailable = false;
 
 // Rate limiting endpointهای وب: جلوگیری از اسپم لمس/درخواست و استهلاک فلش یا رله.
 unsigned long lastToggleManualRequest = 0;
@@ -609,11 +611,10 @@ void setup() {
   // فعال‌سازی واچ‌داگ مخصوص ESP8266 با تایم‌اوت ۸ ثانیه
   setupWatchdog(); 
 
-  // راه‌اندازی حافظه داخلی سیستم
-  if (!LittleFS.begin()) {
-    Serial.println("LittleFS Mount Failed. Formatting...");
-    LittleFS.format();
-    if (!LittleFS.begin()) Serial.println("LittleFS Mount Failed even after formatting!");
+  // راه‌اندازی حافظه داخلی سیستم؛ خرابی mount نباید بدون اجازه کاربر باعث format شود.
+  storageAvailable = LittleFS.begin();
+  if (!storageAvailable) {
+    Serial.println("LittleFS Mount Failed; automatic format was skipped.");
   }
 
   // لود کردن تنظیمات ذخیره شده
@@ -971,6 +972,7 @@ void loadScenarios() {
 }
 
 bool writeTextFileAtomic(const char* path, const String& content) {
+  if (!storageAvailable) return false;
   String tempPath = String(path) + ".tmp";
   LittleFS.remove(tempPath.c_str());
 
@@ -1846,6 +1848,7 @@ void handleGetStatus() {
   doc["apRemaining"] = apRemainingSec;
   doc["apClientConnected"] = (apStationCount > 0) ? 1 : 0;
   doc["freeHeap"] = ESP.getFreeHeap();
+  doc["storageOk"] = storageAvailable ? 1 : 0;
 
   String out;
   serializeJson(doc, out);
