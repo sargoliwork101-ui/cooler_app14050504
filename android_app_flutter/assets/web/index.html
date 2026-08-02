@@ -480,6 +480,7 @@
 let apiBase = localStorage.getItem('esp32ApiBase') || 'http://192.168.4.1';
 let scenarios = [];
 let settingsLoading = false;
+let settingsLoadGeneration = 0;
 let settingsEverLoaded = false;
 let scenarioEditMode = false;
 let currentStatus = null;
@@ -749,7 +750,74 @@ function markErr(i){ const r=document.getElementById('row_'+i); if(r) r.classLis
 function exportScenarios(){ const backup={version:1,type:'esp32-cooler-scenarios',exportedAt:new Date().toISOString(),scenarios:scenarioRowsToData()}; const txt=JSON.stringify(backup,null,2); if(window.FlutterExport){ FlutterExport.postMessage(txt); } else { const blob=new Blob([txt],{type:'application/json'}); const url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='cooler-scenarios.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); } }
 function importScenarios(){ if(window.FlutterImport){ FlutterImport.postMessage('pick'); } else { showModal('انتخاب فایل فقط داخل اپ اندروید فعال است.'); } }
 window.receiveScenarioImport=function(text){ try{ const parsed=JSON.parse(text); const data=Array.isArray(parsed)?parsed:parsed.scenarios; if(!Array.isArray(data)||data.length>20) throw new Error('format'); data.forEach(x=>{ if(!Number.isInteger(x.sh)||!Number.isInteger(x.sm)||!Number.isInteger(x.eh)||!Number.isInteger(x.em)||x.sh<0||x.sh>23||x.eh<0||x.eh>23||x.sm<0||x.sm>59||x.em<0||x.em>59||((x.sh*60+x.sm)===(x.eh*60+x.em))) throw new Error('data'); }); scenarios=data.map(x=>({sh:x.sh,sm:x.sm,eh:x.eh,em:x.em,en:x.en!==false,wd:Number.isInteger(x.wd)&&x.wd>=1&&x.wd<=127?x.wd:127,_dirty:true})); renderScenarios(); markDirty(); showModal('سناریوها از فایل خوانده شدند. برای اعمال روی برد، دکمه «ذخیره و پیاده‌سازی برنامه‌ها» را بزنید.'); }catch(e){ showModal('فایل پشتیبان معتبر نیست یا با این برنامه سازگار نیست.'); } }
-function loadSettings(){ settingsLoading=true; if(!scenariosDirty){ scenarioListMessage('در حال دریافت تنظیمات و سناریوها از برد...','loading'); } const ctrl=new AbortController(); const tid=setTimeout(()=>ctrl.abort(),5000); apiFetch('/settings?t='+Date.now(),{signal:ctrl.signal}).then(r=>{ clearTimeout(tid); if(!r.ok) throw new Error('HTTP '+r.status); return r.json();}).then(s=>{ document.getElementById('brand-name').textContent=s.programName||'کولر هوشمند ESP32'; document.getElementById('brand-sub').textContent=s.programTagline||'ESP32 · TIMER HUB'; const ap=s.ap||{}, sta=s.sta||{}, pr=s.protection||{}; if(ap.ssid) localStorage.setItem('esp32ApSsid',ap.ssid); if(ap.password) localStorage.setItem('esp32ApPass',ap.password); document.getElementById('ap-ssid').value=ap.ssid||''; document.getElementById('wifi-pass').value=ap.password||''; document.getElementById('ap-cycle-enabled').checked=!!ap.cycleEnabled; setSwitch('ap-cycle-switch',!!ap.cycleEnabled); document.getElementById('ap-on-minutes').value=ap.onMinutes||10; document.getElementById('ap-off-minutes').value=ap.offMinutes||5; buildPowerButtons(Number.isInteger(ap.txPowerLevel)?ap.txPowerLevel:3); document.getElementById('internet-enabled').checked=!!sta.internetEnabled; setSwitch('internet-switch',!!sta.internetEnabled); document.getElementById('sta-ssid').value=sta.ssid||''; document.getElementById('sta-pass').value=sta.password||''; document.getElementById('sta-on-minutes').value=sta.onMinutes||10; document.getElementById('sta-off-minutes').value=sta.offMinutes??0; document.getElementById('min-off').value=pr.minOffMinutes??3; if(scenariosDirty){settingsLoading=false;settingsEverLoaded=true;clearSettingsDirty();lastSettingsLoadTime=new Date();updateRefreshTimeLabel();showToast('تنظیمات به‌روز شد، اما سناریوهای محلی حفظ شدند','good');}else{scenarios=(s.scenarios||[]).map(x=>({sh:x.sh,sm:x.sm,eh:x.eh,em:x.em,en:x.en!==false,wd:x.wd||127}));settingsLoading=false;settingsEverLoaded=true;clearDirty();clearSettingsDirty();lastSettingsLoadTime=new Date();updateRefreshTimeLabel();} }).catch((e)=>{ settingsLoading=false; if(!settingsEverLoaded && scenarios.length===0){ scenarioListMessage('دریافت سناریوها از برد ناموفق بود. اتصال به برد یا آدرس API را بررسی کنید.','error'); } else if(scenarios.length>0){ renderScenarios(); } showToast('خطا در دریافت تنظیمات/سناریوها از برد','bad'); }); }
+function loadSettings(force=false){
+  // refresh خودکار نباید فرم در حال ویرایش کاربر را overwrite کند.
+  if(settingsDirty && !force) return Promise.resolve(false);
+  const generation=++settingsLoadGeneration;
+  settingsLoading=true;
+  if(!scenariosDirty) scenarioListMessage('در حال دریافت تنظیمات و سناریوها از برد...','loading');
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),5000);
+  return apiFetch('/settings?t='+Date.now(),{signal:ctrl.signal}).then(r=>{
+    clearTimeout(tid);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(s=>{
+    if(generation!==settingsLoadGeneration) return false;
+    const preserveForms=settingsDirty;
+    document.getElementById('brand-name').textContent=s.programName||'کولر هوشمند ESP32';
+    document.getElementById('brand-sub').textContent=s.programTagline||'ESP32 · TIMER HUB';
+    const ap=s.ap||{}, sta=s.sta||{}, pr=s.protection||{};
+
+    if(!preserveForms){
+      if(ap.ssid) localStorage.setItem('esp32ApSsid',ap.ssid);
+      if(ap.password) localStorage.setItem('esp32ApPass',ap.password);
+      document.getElementById('ap-ssid').value=ap.ssid||'';
+      document.getElementById('wifi-pass').value=ap.password||'';
+      document.getElementById('ap-cycle-enabled').checked=!!ap.cycleEnabled;
+      setSwitch('ap-cycle-switch',!!ap.cycleEnabled);
+      document.getElementById('ap-on-minutes').value=ap.onMinutes??10;
+      document.getElementById('ap-off-minutes').value=ap.offMinutes??5;
+      buildPowerButtons(Number.isInteger(ap.txPowerLevel)?ap.txPowerLevel:3);
+      document.getElementById('internet-enabled').checked=!!sta.internetEnabled;
+      setSwitch('internet-switch',!!sta.internetEnabled);
+      document.getElementById('sta-ssid').value=sta.ssid||'';
+      document.getElementById('sta-pass').value=sta.password||'';
+      document.getElementById('sta-on-minutes').value=sta.onMinutes??10;
+      document.getElementById('sta-off-minutes').value=sta.offMinutes??0;
+      document.getElementById('min-off').value=pr.minOffMinutes??3;
+      clearSettingsDirty();
+    }
+
+    if(scenariosDirty){
+      settingsLoading=false;
+      settingsEverLoaded=true;
+      lastSettingsLoadTime=new Date();
+      updateRefreshTimeLabel();
+      if(preserveForms) showToast('تنظیمات برد دریافت شد؛ تغییرات فرم شما حفظ شدند.','good');
+      else showToast('تنظیمات به‌روز شد، اما سناریوهای محلی حفظ شدند','good');
+    }else{
+      scenarios=(s.scenarios||[]).map(x=>({sh:x.sh,sm:x.sm,eh:x.eh,em:x.em,en:x.en!==false,wd:x.wd||127}));
+      settingsLoading=false;
+      settingsEverLoaded=true;
+      if(!scenariosDirty) clearDirty();
+      lastSettingsLoadTime=new Date();
+      updateRefreshTimeLabel();
+    }
+    return true;
+  }).catch(e=>{
+    clearTimeout(tid);
+    if(generation!==settingsLoadGeneration) return false;
+    settingsLoading=false;
+    if(!settingsEverLoaded && scenarios.length===0){
+      scenarioListMessage('دریافت سناریوها از برد ناموفق بود. اتصال به برد یا آدرس API را بررسی کنید.','error');
+    }else if(scenarios.length>0){
+      renderScenarios();
+    }
+    showToast('خطا در دریافت تنظیمات/سناریوها از برد','bad');
+    return false;
+  });
+}
 function syncTime(){ let now=new Date(); const wd=(now.getDay()+1)%7; runBoardOperation({title:'همگام‌سازی ساعت',path:'/sync',payload:{h:now.getHours(),m:now.getMinutes(),s:now.getSeconds(),y:now.getFullYear(),mon:now.getMonth()+1,d:now.getDate(),wd},successMessage:'ساعت داخلی دستگاه با موفقیت همگام‌سازی شد.',onSuccess:()=>fetchStatus()}); }
 function toggleManual(){
   const currentlyManual=currentStatus && (currentStatus.override===1 || currentStatus.override===true);
