@@ -1507,16 +1507,16 @@ void tryNtpSync() {
   if (!staCurrentlyOn) return;
   if (strlen(sta_ssid) == 0) return;
 
+  // اول باید اتصال واقعی برقرار شده باشد؛ در غیر این صورت پرچم اولین تلاش را مصرف نکن.
+  if (WiFi.status() != WL_CONNECTED) {
+    // زمان آخرین تلاش هم جلو نمی‌رود تا بلافاصله بعد از اتصال، NTP امتحان شود.
+    return;
+  }
+
   if (ntpFirstCheckPending) {
     // اولین بار بعد از این بوت یا بعد از تغییر تنظیمات مودم: فارغ از فاصله‌ی زمانی، همین الان تلاش کن
     ntpFirstCheckPending = false;
   } else if (millis() - lastNtpCheckMillis < interval) {
-    return;
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    // تا وقتی واقعاً به مودم وصل نشده‌ایم، زمان آخرین تلاش را جلو نمی‌بریم تا
-    // به محض برقراری اتصال، گرفتن ساعت بدون انتظار اضافه انجام شود.
     return;
   }
 
