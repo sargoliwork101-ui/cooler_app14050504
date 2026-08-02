@@ -99,6 +99,8 @@ unsigned long lastRelayOffMillis = 0;
 
 // ظرفیت بافر JSON سناریوها (با حاشیه اطمینان محاسبه شده تا هرگز خطای حافظه ندهد).
 const size_t SCENARIOS_JSON_CAPACITY = 6144;
+// سقف body برای جلوگیری از مصرف ناگهانی RAM در WebServer، مخصوصاً روی ESP8266.
+const size_t MAX_API_BODY_SIZE = 4096;
 // ============================================================================
 // STORAGE / MIGRATION VERSION BANNER — CURRENT REVISION: 6
 // دستور مهم برای هر توسعه‌دهنده یا هوش مصنوعی آینده:
@@ -302,7 +304,7 @@ String encryptPassword(const char* password, size_t bufferSize);
 void loadAndDecryptPassword(const char* savedValue, char* outputBuffer, size_t bufferSize);
 
 // FreeRTOS task/mutex layer مخصوص ESP32.
-void lockState();
+bool lockState();
 void unlockState();
 void runLockedHandler(void (*handler)());
 void startFreeRtosTasks();
@@ -315,9 +317,14 @@ void taskMaintenance(void* parameter);
 // Mutex مشترک وضعیت سیستم: همه handlerهای API و taskهای کنترلی قبل از دسترسی به state مشترک
 // آن را می‌گیرند تا در FreeRTOS race condition روی سناریوها، رله، ساعت، WiFi و آمار رخ ندهد.
 SemaphoreHandle_t stateMutex = NULL;
+TaskHandle_t apiTaskHandle = NULL;
+TaskHandle_t controlTaskHandle = NULL;
+TaskHandle_t networkTaskHandle = NULL;
+TaskHandle_t maintenanceTaskHandle = NULL;
 
-void lockState() {
-  if (stateMutex != NULL) xSemaphoreTake(stateMutex, portMAX_DELAY);
+bool lockState() {
+  if (stateMutex == NULL) return false;
+  return xSemaphoreTake(stateMutex, pdMS_TO_TICKS(2000)) == pdTRUE;
 }
 
 void unlockState() {
@@ -325,7 +332,10 @@ void unlockState() {
 }
 
 void runLockedHandler(void (*handler)()) {
-  lockState();
+  if (!lockState()) {
+    sendJsonMessage(503, "error", "Device is busy; try again");
+    return;
+  }
   handler();
   unlockState();
 }
@@ -357,7 +367,9 @@ void setupWatchdog() {
   #else
     esp_task_wdt_init(WDT_TIMEOUT_SEC, true);
   #endif
-  esp_task_wdt_add(NULL);
+  if (esp_task_wdt_add(NULL) != ESP_OK) {
+    Serial.println("Task watchdog registration failed for setup task.");
+  }
 }
 
 void feedWatchdog() {
@@ -400,7 +412,12 @@ bool parseJsonBody(JsonDocument &doc) {
     sendJsonMessage(400, "error", "Missing JSON body");
     return false;
   }
-  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  String body = server.arg("plain");
+  if (body.length() > MAX_API_BODY_SIZE) {
+    sendJsonMessage(413, "error", "Request body is too large");
+    return false;
+  }
+  DeserializationError error = deserializeJson(doc, body);
   if (error) {
     sendJsonMessage(400, "error", "Invalid JSON");
     return false;
@@ -754,14 +771,20 @@ void loop() {
 
 // راه‌اندازی taskهای FreeRTOS مخصوص ESP32.
 void startFreeRtosTasks() {
-  xTaskCreatePinnedToCore(taskApi,         "api",         8192, NULL, 4, NULL, 0);
-  xTaskCreatePinnedToCore(taskControl,     "control",     4096, NULL, 5, NULL, 1);
-  xTaskCreatePinnedToCore(taskNetwork,     "network",     4096, NULL, 3, NULL, 0);
-  xTaskCreatePinnedToCore(taskMaintenance, "maintenance", 4096, NULL, 2, NULL, 1);
+  BaseType_t apiResult = xTaskCreatePinnedToCore(taskApi, "api", 8192, NULL, 4, &apiTaskHandle, 0);
+  BaseType_t controlResult = xTaskCreatePinnedToCore(taskControl, "control", 4096, NULL, 5, &controlTaskHandle, 1);
+  BaseType_t networkResult = xTaskCreatePinnedToCore(taskNetwork, "network", 4096, NULL, 3, &networkTaskHandle, 0);
+  BaseType_t maintenanceResult = xTaskCreatePinnedToCore(taskMaintenance, "maintenance", 4096, NULL, 2, &maintenanceTaskHandle, 1);
+
+  if (apiResult != pdPASS || controlResult != pdPASS ||
+      networkResult != pdPASS || maintenanceResult != pdPASS) {
+    Serial.println("FreeRTOS task creation failed; restarting safely.");
+    ESP.restart();
+  }
 }
 
 void taskApi(void* parameter) {
-  esp_task_wdt_add(NULL);
+  if (esp_task_wdt_add(NULL) != ESP_OK) Serial.println("Task watchdog registration failed: api");
   for (;;) {
     server.handleClient();
     feedWatchdog();
@@ -770,88 +793,91 @@ void taskApi(void* parameter) {
 }
 
 void taskControl(void* parameter) {
-  esp_task_wdt_add(NULL);
+  if (esp_task_wdt_add(NULL) != ESP_OK) Serial.println("Task watchdog registration failed: control");
   unsigned long lastScenarioTask = 0;
   for (;;) {
-    lockState();
-    updateClock();
-    unsigned long now = millis();
-    if (now - lastScenarioTask >= 200UL) {
-      lastScenarioTask = now;
-      checkScenarios();
+    if (lockState()) {
+      updateClock();
+      unsigned long now = millis();
+      if (now - lastScenarioTask >= 200UL) {
+        lastScenarioTask = now;
+        checkScenarios();
+      }
+      unlockState();
     }
-    unlockState();
     feedWatchdog();
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
 void taskNetwork(void* parameter) {
-  esp_task_wdt_add(NULL);
+  if (esp_task_wdt_add(NULL) != ESP_OK) Serial.println("Task watchdog registration failed: network");
   for (;;) {
-    lockState();
-    if (!pendingFactoryReset) {
-      manageStaCycle();
-      tryNtpSync();
-      manageApCycle();
+    if (lockState()) {
+      if (!pendingFactoryReset) {
+        manageStaCycle();
+        tryNtpSync();
+        manageApCycle();
+      }
+      unlockState();
     }
-    unlockState();
     feedWatchdog();
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
 void taskMaintenance(void* parameter) {
-  esp_task_wdt_add(NULL);
+  if (esp_task_wdt_add(NULL) != ESP_OK) Serial.println("Task watchdog registration failed: maintenance");
   int lowHeapStreak = 0;
   unsigned long lastTxPowerRefresh = 0;
   unsigned long lastPinModeRefresh = 0;
   for (;;) {
-    unsigned long now = millis();
-    lockState();
+    if (lockState()) {
+      unsigned long now = millis();
 
-    if (ESP.getFreeHeap() < 2000) {
-      lowHeapStreak++;
-      if (lowHeapStreak >= 5) {
-        Serial.println("Memory too low! Restarting safely to prevent freeze.");
+      if (ESP.getFreeHeap() < 2000) {
+        lowHeapStreak++;
+        if (lowHeapStreak >= 5) {
+          Serial.println("Memory too low! Restarting safely to prevent freeze.");
+          if (!pendingFactoryReset) saveTimeSetting();
+          ESP.restart();
+        }
+      } else {
+        lowHeapStreak = 0;
+      }
+
+      if (pendingReset && (now - resetMillis > 2000UL)) {
         if (!pendingFactoryReset) saveTimeSetting();
         ESP.restart();
       }
-    } else {
-      lowHeapStreak = 0;
-    }
 
-    if (pendingReset && (now - resetMillis > 2000UL)) {
-      if (!pendingFactoryReset) saveTimeSetting();
-      ESP.restart();
-    }
-
-    if (!pendingFactoryReset && time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
-      saveTimeSetting();
-    }
-
-    if (!pendingFactoryReset && relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
-      unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
-      if (elapsedSec > 0) {
-        addRelayOnSecondsSafely(elapsedSec);
-        relayOnSinceMillis = millis();
-      } else {
-        relayOnSinceMillis = millis();
+      if (!pendingFactoryReset && time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
+        saveTimeSetting();
       }
-      saveRelayStats();
-    }
 
-    if (now - lastTxPowerRefresh >= 30000UL) {
-      applyApTxPower();
-      lastTxPowerRefresh = now;
-    }
+      if (!pendingFactoryReset && relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
+        unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
+        if (elapsedSec > 0) {
+          addRelayOnSecondsSafely(elapsedSec);
+          relayOnSinceMillis = millis();
+        } else {
+          relayOnSinceMillis = millis();
+        }
+        saveRelayStats();
+      }
 
-    if (now - lastPinModeRefresh >= 30000UL) {
-      pinMode(RELAY_PIN, OUTPUT);
-      lastPinModeRefresh = now;
-    }
+      if (now - lastTxPowerRefresh >= 30000UL) {
+        applyApTxPower();
+        lastTxPowerRefresh = now;
+      }
 
-    unlockState();
+      if (now - lastPinModeRefresh >= 30000UL) {
+        pinMode(RELAY_PIN, OUTPUT);
+        lastPinModeRefresh = now;
+      }
+
+      unlockState();
+    }
     feedWatchdog();
     vTaskDelay(pdMS_TO_TICKS(1000));
   }

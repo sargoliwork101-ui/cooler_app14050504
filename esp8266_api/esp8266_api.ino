@@ -99,6 +99,8 @@ unsigned long lastRelayOffMillis = 0;
 
 // ظرفیت بافر JSON سناریوها (با حاشیه اطمینان محاسبه شده تا هرگز خطای حافظه ندهد).
 const size_t SCENARIOS_JSON_CAPACITY = 6144;
+// سقف body برای جلوگیری از مصرف ناگهانی RAM در WebServer، مخصوصاً روی ESP8266.
+const size_t MAX_API_BODY_SIZE = 4096;
 // ============================================================================
 // STORAGE / MIGRATION VERSION BANNER — CURRENT REVISION: 6
 // دستور مهم برای هر توسعه‌دهنده یا هوش مصنوعی آینده:
@@ -361,7 +363,12 @@ bool parseJsonBody(JsonDocument &doc) {
     sendJsonMessage(400, "error", "Missing JSON body");
     return false;
   }
-  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  String body = server.arg("plain");
+  if (body.length() > MAX_API_BODY_SIZE) {
+    sendJsonMessage(413, "error", "Request body is too large");
+    return false;
+  }
+  DeserializationError error = deserializeJson(doc, body);
   if (error) {
     sendJsonMessage(400, "error", "Invalid JSON");
     return false;
