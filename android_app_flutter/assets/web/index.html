@@ -863,8 +863,7 @@ buildPowerButtons(3); if(localStorage.getItem('esp32WifiAutoApproved')!=='1'){ s
     if(!_isSwiping) return;
     e.preventDefault();
     _swipeDelta=dx;
-    // صفحه بعدی در سمت راست باید با کشیدن انگشت به راست به مرکز نزدیک شود.
-    const cw=pagesEl.offsetWidth, pct=-RTL*(_swipeDelta/cw)*100;
+    const cw=pagesEl.offsetWidth, pct=RTL*(_swipeDelta/cw)*100;
     document.querySelectorAll('.page').forEach((p)=>{
       const tabId=p.id.replace('tab-','');
       const tabIndex=TABS.indexOf(tabId);
@@ -878,8 +877,8 @@ buildPowerButtons(3); if(localStorage.getItem('esp32WifiAutoApproved')!=='1'){ s
     _isSwiping=false;
     const cw=pagesEl.offsetWidth, thr=cw*0.25;
     let ni=currentTabIndex;
-    if(_swipeDelta>thr&&currentTabIndex<TABS.length-1) ni=currentTabIndex+1;
-    else if(_swipeDelta<-thr&&currentTabIndex>0) ni=currentTabIndex-1;
+    if(_swipeDelta<-thr&&currentTabIndex<TABS.length-1) ni=currentTabIndex+1;
+    else if(_swipeDelta>thr&&currentTabIndex>0) ni=currentTabIndex-1;
     if(ni!==currentTabIndex) switchTab(TABS[ni]);
     else updatePagePositions(true);
   }
