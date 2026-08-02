@@ -25,7 +25,7 @@ const char* PROGRAM_NAME    = "کولر هوشمند ESP8266";
 // زیرنویس/برند کوچک زیر نام برنامه در نوار بالا (مثلاً مدل برد).
 const char* PROGRAM_TAGLINE = "ESP8266 · TIMER HUB";
 
-// پایه (پین) خروجی متصل به رله روی برد ESP32-WROOM.
+// پایه (پین) خروجی متصل به رله روی برد ESP8266/ESP-01.
 // GPIO23 یک پایه امن برای خروجی است. اگر رله روی پایه دیگری وصل است، فقط این عدد را تغییر دهید.
 // نکته: GPIO3 (پایه RX0 سریال) برای رله پیشنهاد نمی‌شود.
 // ESP8266-01 فقط GPIO0 و GPIO2 را واقعاً در دسترس دارد. GPIO2 برای رله معمولاً امن‌تر است،
@@ -46,7 +46,7 @@ const unsigned char AES_KEY[16] = {
 };
 
 // نام و رمز شبکه Access Point خود دستگاه (برای اتصال مستقیم گوشی به برد).
-// رمز AP طبق قوانین ESP32 باید حداقل ۸ کاراکتر باشد.
+// رمز AP طبق قوانین WiFi باید حداقل ۸ کاراکتر باشد.
 char custom_ssid[32]     = "ESP32_Timer_Hub";
 char custom_password[32] = "12345678";
 
@@ -84,7 +84,7 @@ const int MAX_AP_CYCLE_MINUTES = 1440;
 bool apCurrentlyOn = true;            // وضعیت واقعی فعلی AP (برای مدیریت چرخه)
 unsigned long apCycleLastToggleMillis = 0;
 
-// سطح قدرت سیگنال‌دهی AP/رادیوی وای‌فای برد (روی کل رادیو اعمال می‌شود، چون ESP32 یک تنظیم توان واحد دارد):
+// سطح قدرت سیگنال‌دهی AP/رادیوی وای‌فای برد (روی کل رادیو اعمال می‌شود، چون ESP8266 یک تنظیم توان واحد دارد):
 // 0=کم، 1=متوسط، 2=زیاد، 3=حداکثر (مقدار پیش‌فرض سازنده و رفتار قبلی برنامه)
 int apTxPowerLevel = 3;
 const int MAX_AP_TX_POWER_LEVEL = 3;
@@ -99,6 +99,8 @@ unsigned long lastRelayOffMillis = 0;
 
 // ظرفیت بافر JSON سناریوها (با حاشیه اطمینان محاسبه شده تا هرگز خطای حافظه ندهد).
 const size_t SCENARIOS_JSON_CAPACITY = 6144;
+// سقف body برای جلوگیری از مصرف ناگهانی RAM در WebServer، مخصوصاً روی ESP8266.
+const size_t MAX_API_BODY_SIZE = 4096;
 // ============================================================================
 // STORAGE / MIGRATION VERSION BANNER — CURRENT REVISION: 6
 // دستور مهم برای هر توسعه‌دهنده یا هوش مصنوعی آینده:
@@ -115,7 +117,7 @@ const int OVERRIDE_FILE_VERSION = 2;
 const int PROTECTION_FILE_VERSION = 1;
 const int NTP_META_FILE_VERSION = 1;
 
-// زمان‌سنج (Watchdog) اختصاصی ESP32 به ثانیه — در صورت هنگ کردن برد، خودش ری‌استارت می‌شود.
+// زمان‌سنج (Watchdog) اختصاصی ESP8266 به ثانیه — در صورت هنگ کردن برد، خودش ری‌استارت می‌شود.
 const int WDT_TIMEOUT_SEC = 8;
 
 // فاصله ذخیره پشتیبان دوره‌ای ساعت روی حافظه (برای مقاومت در برابر قطع برق).
@@ -141,7 +143,7 @@ bool pendingFactoryReset = false;
 
 void feedWatchdog();
 
-// ESP32 در این نسخه هیچ HTML/CSS/JS تولید نمی‌کند؛ فقط API JSON ارائه می‌شود.
+// ESP8266 در این نسخه هیچ HTML/CSS/JS تولید نمی‌کند؛ فقط API JSON ارائه می‌شود.
 
 // ساختار هر سناریو
 struct Scenario {
@@ -201,6 +203,8 @@ bool staEverConnectedThisBoot = false;
 // متغیرهای مدیریت ریستارت غیر بلاک کننده
 unsigned long resetMillis = 0;
 bool pendingReset = false;
+// اگر mount حافظه شکست بخورد، برد بدون format خودکار بالا می‌آید و ذخیره‌سازی خطا می‌دهد.
+bool storageAvailable = false;
 
 // Rate limiting endpointهای وب: جلوگیری از اسپم لمس/درخواست و استهلاک فلش یا رله.
 unsigned long lastToggleManualRequest = 0;
@@ -212,6 +216,10 @@ unsigned long lastSaveProtectionRequest = 0;
 unsigned long lastSaveApCycleRequest = 0;
 unsigned long lastFactoryResetRequest = 0;
 unsigned long lastStatusRequest = 0;
+
+// آخرین فرمان دستی پردازش‌شده؛ برای اینکه retry همان درخواست دوباره toggle نکند.
+String lastManualRequestId;
+int lastManualRequestOverride = -1;
 
 // ============ مدیریت ذخیره امن زمان (برای مقاومت در برابر نوسان برق) ============
 // به‌جای یک فایل، از دو فایل به صورت چرخشی (Round-Robin) استفاده می‌شود.
@@ -244,25 +252,25 @@ const unsigned long MAX_RELAY_OPEN_PERIOD_SECONDS = (TIME_SAVE_INTERVAL / 1000UL
 
 // تعریف توابع سیستم
 void loadScenarios();
-void saveScenarios();
+bool saveScenarios();
 void loadWiFiSettings();
-void saveWiFiSettings();
+bool saveWiFiSettings();
 void loadOverrideSetting();
 void loadProtectionSettings();
-void saveProtectionSettings();
-void saveOverrideSetting();
-void saveTimeSetting();
+bool saveProtectionSettings();
+bool saveOverrideSetting();
+bool saveTimeSetting();
 void loadTimeSetting();
 bool readTimeFile(const char* path, int &h, int &m, int &s, int &sync, unsigned long &seq, int &y, int &mon, int &d, int &wd);
 void advanceDate();
 bool isLeapYear(int year);
-void saveRelayStats();
+bool saveRelayStats();
 void loadRelayStats();
 bool readRelayStatFile(const char* path, unsigned long &sc, unsigned long &tos, unsigned long &seq);
 unsigned long relayCurrentPeriodElapsedSeconds();
 void addRelayOnSecondsSafely(unsigned long secondsToAdd);
 void loadNtpSuccessInfo();
-void saveNtpSuccessInfo();
+bool saveNtpSuccessInfo();
 void handleApiRoot();
 void handleGetSettings();
 void handleSaveScenario();
@@ -276,10 +284,12 @@ void handleSaveApCycle();
 void handleFactoryReset();
 bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs);
 void sendJsonMessage(int code, const char* status, const char* message);
+bool rejectIfFactoryResetPending();
 void handleCorsOptions();
 bool parseJsonBody(JsonDocument &doc);
 String fnv1aChecksum(const String &data);
 JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok);
+String requestIdFromDocument(JsonDocument &doc);
 void checkScenarios();
 void updateClock();
 void setRelay(bool state);
@@ -305,9 +315,9 @@ bool allowRequest(unsigned long &lastRequest, unsigned long minIntervalMs) {
   return true;
 }
 
-// ================== Watchdog مخصوص ESP32 ==================
+// ================== Watchdog مخصوص ESP8266 ==================
 // در نسخه ESP8266 از ESP.wdtEnable/ESP.wdtFeed استفاده می‌شد؛
-// در ESP32 باید از Task Watchdog رسمی خود ESP-IDF استفاده کنیم.
+// در ESP8266 از ESP.wdtEnable/ESP.wdtFeed استفاده می‌شود.
 
 void setupWatchdog() {
   ESP.wdtEnable(WDT_TIMEOUT_SEC * 1000);
@@ -333,6 +343,12 @@ void sendJsonMessage(int code, const char* status, const char* message) {
   server.send(code, "application/json", out);
 }
 
+bool rejectIfFactoryResetPending() {
+  if (!pendingFactoryReset) return false;
+  sendJsonMessage(409, "error", "Factory reset is in progress");
+  return true;
+}
+
 void handleCorsOptions() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -347,7 +363,12 @@ bool parseJsonBody(JsonDocument &doc) {
     sendJsonMessage(400, "error", "Missing JSON body");
     return false;
   }
-  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  String body = server.arg("plain");
+  if (body.length() > MAX_API_BODY_SIZE) {
+    sendJsonMessage(413, "error", "Request body is too large");
+    return false;
+  }
+  DeserializationError error = deserializeJson(doc, body);
   if (error) {
     sendJsonMessage(400, "error", "Invalid JSON");
     return false;
@@ -391,6 +412,15 @@ JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok) {
   return doc.as<JsonVariantConst>();
 }
 
+// شناسه درخواست در envelope فقط برای جلوگیری از اجرای دوباره همان فرمان استفاده می‌شود.
+String requestIdFromDocument(JsonDocument &doc) {
+  if (!doc.is<JsonObjectConst>()) return "";
+  JsonObjectConst root = doc.as<JsonObjectConst>();
+  String id = String((const char*)(root["requestId"] | ""));
+  if (id.length() > 64) id = "";
+  return id;
+}
+
 // تابع کمکی برای سوئیچ کردن رله بر اساس منطق (Active-Low یا Active-High)
 void setRelay(bool state) {
   if (state) {
@@ -405,8 +435,8 @@ void setRelay(bool state) {
 // ============================================================
 
 // اعمال سطح قدرت سیگنال انتخاب‌شده روی رادیوی وای‌فای برد.
-// نکته مهم: در ESP32 این تنظیم روی کل رادیو اعمال می‌شود (هم AP هم STA)، چون فقط یک رادیوی
-// فیزیکی مشترک وجود دارد؛ تفکیک جداگانه‌ی توان برای AP و STA در سخت‌افزار ESP32 ممکن نیست.
+// نکته مهم: در ESP8266 این تنظیم روی کل رادیو اعمال می‌شود (هم AP هم STA)، چون فقط یک رادیوی
+// فیزیکی مشترک وجود دارد؛ تفکیک جداگانه‌ی توان برای AP و STA در سخت‌افزار ESP8266 ممکن نیست.
 void applyApTxPower() {
   float dbm;
   switch (apTxPowerLevel) {
@@ -469,7 +499,7 @@ void manageApCycle() {
 }
 
 // ============================================================
-//  توابع رمزنگاری سخت‌افزاری (AES) مختص ESP32
+//  توابع رمزنگاری (AES) مبتنی بر BearSSL مختص ESP8266
 // ============================================================
 
 // رمزنگاری/رمزگشایی یک بلوک ۱۶ بایتی AES-128 به صورت ECB.
@@ -582,17 +612,16 @@ void loadAndDecryptPassword(const char* savedValue, char* outputBuffer, size_t b
 }
 
 void setup() {
-  // راه‌اندازی سریال در ESP32؛ پایه رله از RX0 جدا شده تا تداخل سریال ایجاد نشود
+  // راه‌اندازی سریال در ESP8266؛ پایه رله از RX0 جدا شده تا تداخل سریال ایجاد نشود
   Serial.begin(115200);
   
-  // فعال‌سازی واچ‌داگ مخصوص ESP32 با تایم‌اوت ۸ ثانیه
+  // فعال‌سازی واچ‌داگ مخصوص ESP8266 با تایم‌اوت ۸ ثانیه
   setupWatchdog(); 
 
-  // راه‌اندازی حافظه داخلی سیستم
-  if (!LittleFS.begin()) {
-    Serial.println("LittleFS Mount Failed. Formatting...");
-    LittleFS.format();
-    if (!LittleFS.begin()) Serial.println("LittleFS Mount Failed even after formatting!");
+  // راه‌اندازی حافظه داخلی سیستم؛ خرابی mount نباید بدون اجازه کاربر باعث format شود.
+  storageAvailable = LittleFS.begin();
+  if (!storageAvailable) {
+    Serial.println("LittleFS Mount Failed; automatic format was skipped.");
   }
 
   // لود کردن تنظیمات ذخیره شده
@@ -633,7 +662,7 @@ void setup() {
 
   // راه‌اندازی وای‌فای به صورت همزمان: AP برای اتصال مستقیم گوشی + STA برای اتصال اختیاری به اینترنت
   WiFi.mode(WIFI_AP_STA);
-  WiFi.persistent(false);              // جلوگیری از نوشتن بی‌مورد تنظیمات وای‌فای روی فلش داخلی ESP32
+  WiFi.persistent(false);              // جلوگیری از نوشتن بی‌مورد تنظیمات وای‌فای روی فلش داخلی ESP8266
   WiFi.setAutoReconnect(true);         // در فاز روشنِ STA اگر اتصال به مودم قطع شد، خود برد دوباره تلاش کند
   WiFi.softAP(custom_ssid, custom_password, 1, 0, 3);
   applyApTxPower();      // اعمال سطح قدرت سیگنال ذخیره‌شده (یا پیش‌فرض حداکثر)
@@ -715,7 +744,7 @@ void loop() {
       lowHeapStreak++;
       if (lowHeapStreak >= 5) {
         Serial.println("Memory too low! Restarting safely to prevent freeze.");
-        saveTimeSetting();
+        if (!pendingFactoryReset) saveTimeSetting();
         ESP.restart();
       }
     } else {
@@ -734,18 +763,20 @@ void loop() {
   static unsigned long lastNetworkTask = 0;
   if (now - lastNetworkTask >= 1000UL) {
     lastNetworkTask = now;
-    manageStaCycle();
-    tryNtpSync();
-    manageApCycle();
+    if (!pendingFactoryReset) {
+      manageStaCycle();
+      tryNtpSync();
+      manageApCycle();
+    }
   }
 
   // ذخیره پشتیبان دوره‌ای زمان.
-  if (time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
+  if (!pendingFactoryReset && time_synchronized && (now - lastTimeSaveMillis >= TIME_SAVE_INTERVAL)) {
     saveTimeSetting();
   }
 
   // ذخیره پیشرفت دوره‌ی جاری «روشن بودن» رله.
-  if (relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
+  if (!pendingFactoryReset && relayCurrentlyOnForStats && (now - lastRelayStatSaveMillis >= TIME_SAVE_INTERVAL)) {
     unsigned long elapsedSec = relayCurrentPeriodElapsedSeconds();
     if (elapsedSec > 0) {
       addRelayOnSecondsSafely(elapsedSec);
@@ -808,6 +839,12 @@ void advanceDate() {
 }
 
 void checkScenarios() {
+  // هنگام Factory Reset هیچ سناریویی نباید دوباره رله را روشن کند.
+  if (pendingFactoryReset) {
+    setRelay(false);
+    return;
+  }
+
   // جلوگیری از ذخیره‌سازی/لاگ بی‌دلیل با کش کردن وضعیت منطقی قبلی
   static int lastKnownState = -1; 
   bool desiredState;
@@ -941,17 +978,41 @@ void loadScenarios() {
   }
 }
 
-void saveScenarios() {
-  // تغییر به DynamicJsonDocument برای جلوگیری از Stack Overflow
+bool writeTextFileAtomic(const char* path, const String& content) {
+  if (!storageAvailable) return false;
+  String tempPath = String(path) + ".tmp";
+  LittleFS.remove(tempPath.c_str());
+
+  File f = LittleFS.open(tempPath.c_str(), "w");
+  if (!f) return false;
+  size_t expected = content.length();
+  size_t written = f.print(content);
+  f.close();
+
+  if (written != expected) {
+    LittleFS.remove(tempPath.c_str());
+    return false;
+  }
+
+  // rename در LittleFS اتمیک است و فایل قبلی را فقط بعد از کامل شدن فایل جدید جایگزین می‌کند.
+  // اگر rename شکست بخورد، فایل قبلی عمداً دست‌نخورده باقی می‌ماند.
+  if (!LittleFS.rename(tempPath.c_str(), path)) {
+    LittleFS.remove(tempPath.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool saveScenarios() {
   DynamicJsonDocument doc(SCENARIOS_JSON_CAPACITY);
   JsonObject root = doc.to<JsonObject>();
   root["version"] = SCENARIOS_FILE_VERSION;
   JsonArray array = root.createNestedArray("items");
-  
+
   for (int i = 0; i < MAX_SCENARIOS; i++) {
     JsonObject obj = array.createNestedObject();
     obj["active"] = scenarios[i].active;
-    obj["en"] = scenarios[i].enabled; // فعال بودن اجرای سناریو، جدا از حذف شدن آن
+    obj["en"] = scenarios[i].enabled;
     obj["sh"] = scenarios[i].startHour;
     obj["sm"] = scenarios[i].startMinute;
     obj["eh"] = scenarios[i].endHour;
@@ -959,17 +1020,15 @@ void saveScenarios() {
     obj["wd"] = scenarios[i].weekdays;
   }
 
-  File configFile = LittleFS.open("/scenarios.json", "w");
-  if (!configFile) return;
-  size_t written = serializeJson(doc, configFile);
-  configFile.close();
-
-  // اگر چیزی نوشته نشد یعنی فلش پر بوده یا خرابی رخ داده؛ فایل خراب را حذف می‌کنیم
-  // تا در بوت بعدی به‌جای دیتای ناقص، به‌درستی رد شود.
-  if (written == 0) {
+  String serialized;
+  serialized.reserve(SCENARIOS_JSON_CAPACITY);
+  size_t expected = serializeJson(doc, serialized);
+  if (expected == 0 || expected != serialized.length() ||
+      !writeTextFileAtomic("/scenarios.json", serialized)) {
     Serial.println("saveScenarios write failed!");
-    LittleFS.remove("/scenarios.json");
+    return false;
   }
+  return true;
 }
 
 void loadWiFiSettings() {
@@ -1033,40 +1092,38 @@ void loadWiFiSettings() {
   }
 }
 
-void saveWiFiSettings() {
+bool saveWiFiSettings() {
+  String encryptedApPassword = encryptPassword(custom_password, 32);
+  String encryptedStaPassword = encryptPassword(sta_password, 64);
+  if ((strlen(custom_password) > 0 && encryptedApPassword.length() == 0) ||
+      (strlen(sta_password) > 0 && encryptedStaPassword.length() == 0)) {
+    Serial.println("saveWiFiSettings encryption failed!");
+    return false;
+  }
+
   StaticJsonDocument<1024> doc;
   doc["version"] = WIFI_FILE_VERSION;
   doc["ssid"] = custom_ssid;
-  
-  // اعمال رمزنگاری سخت‌افزاری بر روی پسورد شبکه محلی بورد
-  doc["pass"] = encryptPassword(custom_password, 32);
-  
+  doc["pass"] = encryptedApPassword;
   doc["sta_ssid"] = sta_ssid;
-  
-  // اعمال رمزنگاری سخت‌افزاری بر روی پسورد مودم کاربر قبل از نگارش در فلش مموری بورد
-  doc["sta_pass"] = encryptPassword(sta_password, 64);
-  
+  doc["sta_pass"] = encryptedStaPassword;
   doc["internet"] = internet_enabled;
   doc["staOnMinutes"] = staOnMinutes;
   doc["staOffMinutes"] = staOffMinutes;
-
   doc["apCycleEnabled"] = apCycleEnabled;
   doc["apOnMinutes"] = apOnMinutes;
   doc["apOffMinutes"] = apOffMinutes;
   doc["apTxPowerLevel"] = apTxPowerLevel;
 
-  File configFile = LittleFS.open("/wifi.json", "w");
-  if (!configFile) return;
-  size_t written = serializeJson(doc, configFile);
-  configFile.close();
-
-  // مطابق همان الگوی محافظتی سایر توابع ذخیره‌سازی (saveScenarios/saveTimeSetting/...):
-  // اگر نوشتن ناقص بود (مثلاً فلش پر بود)، فایل نیمه‌نوشته را حذف می‌کنیم تا در بوت بعدی
-  // به‌جای خواندن دیتای خراب (که می‌تواند شامل SSID/رمز رمزنگاری‌شده باشد)، به‌درستی رد شود.
-  if (written == 0) {
+  String serialized;
+  serialized.reserve(512);
+  size_t expected = serializeJson(doc, serialized);
+  if (expected == 0 || expected != serialized.length() ||
+      !writeTextFileAtomic("/wifi.json", serialized)) {
     Serial.println("saveWiFiSettings write failed!");
-    LittleFS.remove("/wifi.json");
+    return false;
   }
+  return true;
 }
 
 void loadOverrideSetting() {
@@ -1084,12 +1141,11 @@ void loadOverrideSetting() {
   }
 }
 
-void saveOverrideSetting() {
-  File f = LittleFS.open("/override.txt", "w");
-  if (f) {
-    f.print("V"); f.print(OVERRIDE_FILE_VERSION); f.print(":"); f.print(manual_override);
-    f.close();
-  }
+bool saveOverrideSetting() {
+  String content = String("V") + String(OVERRIDE_FILE_VERSION) + ":" + String(manual_override);
+  bool ok = writeTextFileAtomic("/override.txt", content);
+  if (!ok) Serial.println("saveOverrideSetting write failed!");
+  return ok;
 }
 
 // تنظیمات محافظ ضد استارت مکرر جدا از Wi-Fi نگهداری می‌شود تا توسعه‌ی آینده مستقل باشد.
@@ -1102,36 +1158,38 @@ void loadProtectionSettings() {
     antiShortCycleMinutes = constrain(value, 0, MAX_ANTI_SHORT_CYCLE_MINUTES);
   }
 }
-void saveProtectionSettings() {
+bool saveProtectionSettings() {
   StaticJsonDocument<128> doc;
-  doc["version"] = PROTECTION_FILE_VERSION; doc["minOffMinutes"] = antiShortCycleMinutes;
-  File f = LittleFS.open("/protection.json", "w"); if (!f) return;
-  size_t written = serializeJson(doc, f); f.close();
-  // مطابق همان الگوی محافظتی سایر توابع ذخیره‌سازی: نوشتن ناقص را با حذف فایل خراب مشخص می‌کنیم.
-  if (written == 0) {
-    Serial.println("saveProtectionSettings write failed!");
-    LittleFS.remove("/protection.json");
-  }
+  doc["version"] = PROTECTION_FILE_VERSION;
+  doc["minOffMinutes"] = antiShortCycleMinutes;
+  String serialized;
+  size_t expected = serializeJson(doc, serialized);
+  bool ok = expected > 0 && expected == serialized.length() &&
+            writeTextFileAtomic("/protection.json", serialized);
+  if (!ok) Serial.println("saveProtectionSettings write failed!");
+  return ok;
 }
 
 // نوشتن مقدار فعلی ساعت روی یکی از دو فایل به نوبت (Round-Robin)
 // این کار باعث می‌شود اگر برق درست حین نوشتن قطع شود، نسخه ذخیره شده در فایل دیگر (که دست نخورده مانده) در دسترس بماند
-void saveTimeSetting() {
-  timeSaveSeq++;
-  timeFileSlot = 1 - timeFileSlot; // جابجایی بین فایل ۰ و ۱
-
-  File f = LittleFS.open(TIME_FILES[timeFileSlot], "w");
-  if (f) {
-    size_t written = f.printf("V%d:%d:%d:%d:%d:%lu:%d:%d:%d:%d", TIME_FILE_VERSION, currentHour, currentMinute, currentSecond, time_synchronized ? 1 : 0, timeSaveSeq, currentYear, currentMonth, currentDay, currentWeekday);
-    f.close();
-    // اگر نوشتن ناقص بود، این فایل را حذف می‌کنیم تا readTimeFile آن را نامعتبر تشخیص دهد
-    // و به‌جای یک رکورد خراب، سراغ فایل زوجش (که سالم مانده) برود.
-    if (written == 0) {
-      Serial.println("saveTimeSetting write failed!");
-      LittleFS.remove(TIME_FILES[timeFileSlot]);
-    }
+bool saveTimeSetting() {
+  unsigned long nextSeq = timeSaveSeq + 1;
+  int nextSlot = 1 - timeFileSlot;
+  char record[128];
+  int length = snprintf(record, sizeof(record),
+                        "V%d:%d:%d:%d:%d:%lu:%d:%d:%d:%d",
+                        TIME_FILE_VERSION, currentHour, currentMinute, currentSecond,
+                        time_synchronized ? 1 : 0, nextSeq, currentYear, currentMonth,
+                        currentDay, currentWeekday);
+  if (length <= 0 || (size_t)length >= sizeof(record) ||
+      !writeTextFileAtomic(TIME_FILES[nextSlot], String(record))) {
+    Serial.println("saveTimeSetting write failed!");
+    return false;
   }
+  timeSaveSeq = nextSeq;
+  timeFileSlot = nextSlot;
   lastTimeSaveMillis = millis();
+  return true;
 }
 
 // خواندن و اعتبارسنجی یکی از دو فایل زمان. در صورت معتبر بودن مقادیر، true برمی‌گرداند
@@ -1205,20 +1263,22 @@ void loadTimeSetting() {
 
 // نوشتن آمار سوییچ/مدت‌کارکرد رله روی یکی از دو فایل به نوبت (Round-Robin)، دقیقاً مشابه ذخیره‌سازی ساعت،
 // تا در صورت قطع برق درست وسط نوشتن، نسخه‌ی فایل دیگر سالم و قابل استفاده باقی بماند.
-void saveRelayStats() {
-  relayStatSaveSeq++;
-  relayStatFileSlot = 1 - relayStatFileSlot;
-
-  File f = LittleFS.open(RELAY_STAT_FILES[relayStatFileSlot], "w");
-  if (f) {
-    size_t written = f.printf("V%d:%lu:%lu:%lu", RELAY_STAT_FILE_VERSION, relaySwitchCount, relayTotalOnSeconds, relayStatSaveSeq);
-    f.close();
-    if (written == 0) {
-      Serial.println("saveRelayStats write failed!");
-      LittleFS.remove(RELAY_STAT_FILES[relayStatFileSlot]);
-    }
+bool saveRelayStats() {
+  unsigned long nextSeq = relayStatSaveSeq + 1;
+  int nextSlot = 1 - relayStatFileSlot;
+  char record[96];
+  int length = snprintf(record, sizeof(record), "V%d:%lu:%lu:%lu",
+                        RELAY_STAT_FILE_VERSION, relaySwitchCount,
+                        relayTotalOnSeconds, nextSeq);
+  if (length <= 0 || (size_t)length >= sizeof(record) ||
+      !writeTextFileAtomic(RELAY_STAT_FILES[nextSlot], String(record))) {
+    Serial.println("saveRelayStats write failed!");
+    return false;
   }
+  relayStatSaveSeq = nextSeq;
+  relayStatFileSlot = nextSlot;
   lastRelayStatSaveMillis = millis();
+  return true;
 }
 
 // بارگذاری آخرین دریافت موفق ساعت از اینترنت (NTP) از فلش.
@@ -1253,8 +1313,8 @@ void loadNtpSuccessInfo() {
 }
 
 // ذخیره آخرین دریافت موفق ساعت از اینترنت به‌صورت تاریخ/ساعت مطلق؛ آخرین تلاش ناموفق اصلاً ذخیره نمی‌شود.
-void saveNtpSuccessInfo() {
-  if (!ntpLastSuccessValid) return;
+bool saveNtpSuccessInfo() {
+  if (!ntpLastSuccessValid) return true;
 
   StaticJsonDocument<192> doc;
   doc["version"] = NTP_META_FILE_VERSION;
@@ -1264,15 +1324,12 @@ void saveNtpSuccessInfo() {
   doc["h"] = ntpLastSuccessHour;
   doc["m"] = ntpLastSuccessMinute;
   doc["s"] = ntpLastSuccessSecond;
-
-  File f = LittleFS.open(NTP_META_FILE, "w");
-  if (!f) return;
-  size_t written = serializeJson(doc, f);
-  f.close();
-  if (written == 0) {
-    Serial.println("saveNtpSuccessInfo write failed!");
-    LittleFS.remove(NTP_META_FILE);
-  }
+  String serialized;
+  size_t expected = serializeJson(doc, serialized);
+  bool ok = expected > 0 && expected == serialized.length() &&
+            writeTextFileAtomic(NTP_META_FILE, serialized);
+  if (!ok) Serial.println("saveNtpSuccessInfo write failed!");
+  return ok;
 }
 
 // محاسبه امن مدت دوره جاری روشن بودن رله.
@@ -1439,7 +1496,7 @@ void connectToInternetWiFi() {
   // تنظیم ساعت با اولویت سرورهای داخلی ایران و سپس سرور جهانی
   configTime(NTP_GMT_OFFSET_SEC, 0, "ir.pool.ntp.org", "ntp.nic.ir", "pool.ntp.org");
 
-  // نکته مهم: WiFi.begin() در هسته آردوینوی ESP32 می‌تواند به‌صورت داخلی تنظیم قدرت سیگنال رادیو را
+  // نکته مهم: WiFi.begin() در هسته آردوینوی ESP8266 می‌تواند به‌صورت داخلی تنظیم قدرت سیگنال رادیو را
   // به مقدار پیش‌فرض (حداکثر) بازنشانی کند. برای همین بلافاصله بعد از هر تلاش اتصال STA، سطح
   // انتخاب‌شده‌ی کاربر دوباره روی رادیو اعمال می‌شود تا تنظیم «قدرت سیگنال» واقعاً پابرجا بماند.
   applyApTxPower();
@@ -1457,16 +1514,16 @@ void tryNtpSync() {
   if (!staCurrentlyOn) return;
   if (strlen(sta_ssid) == 0) return;
 
+  // اول باید اتصال واقعی برقرار شده باشد؛ در غیر این صورت پرچم اولین تلاش را مصرف نکن.
+  if (WiFi.status() != WL_CONNECTED) {
+    // زمان آخرین تلاش هم جلو نمی‌رود تا بلافاصله بعد از اتصال، NTP امتحان شود.
+    return;
+  }
+
   if (ntpFirstCheckPending) {
     // اولین بار بعد از این بوت یا بعد از تغییر تنظیمات مودم: فارغ از فاصله‌ی زمانی، همین الان تلاش کن
     ntpFirstCheckPending = false;
   } else if (millis() - lastNtpCheckMillis < interval) {
-    return;
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    // تا وقتی واقعاً به مودم وصل نشده‌ایم، زمان آخرین تلاش را جلو نمی‌بریم تا
-    // به محض برقراری اتصال، گرفتن ساعت بدون انتظار اضافه انجام شود.
     return;
   }
 
@@ -1573,6 +1630,7 @@ void handleGetSettings() {
 }
 
 void handleSaveScenario() {
+  if (rejectIfFactoryResetPending()) return;
   if (!allowRequest(lastSaveScenarioRequest, 1200UL)) return;
 
   DynamicJsonDocument doc(SCENARIOS_JSON_CAPACITY);
@@ -1638,14 +1696,21 @@ void handleSaveScenario() {
   }
 
   if (isChanged) {
+    Scenario previous[MAX_SCENARIOS];
+    for (int j = 0; j < MAX_SCENARIOS; j++) previous[j] = scenarios[j];
     for (int j = 0; j < MAX_SCENARIOS; j++) scenarios[j] = temp[j];
-    saveScenarios();
+    if (!saveScenarios()) {
+      for (int j = 0; j < MAX_SCENARIOS; j++) scenarios[j] = previous[j];
+      sendJsonMessage(500, "error", "Scenarios could not be saved to storage");
+      return;
+    }
   }
 
   sendJsonMessage(200, "success", isChanged ? "Scenarios saved" : "No changes");
 }
 
 void handleSyncTime() {
+  if (rejectIfFactoryResetPending()) return;
   if (!allowRequest(lastSyncRequest, 1000UL)) return;
 
   StaticJsonDocument<256> doc;
@@ -1668,6 +1733,11 @@ void handleSyncTime() {
     return;
   }
 
+  int oldHour=currentHour, oldMinute=currentMinute, oldSecond=currentSecond;
+  int oldYear=currentYear, oldMonth=currentMonth, oldDay=currentDay, oldWeekday=currentWeekday;
+  bool oldSynchronized=time_synchronized;
+  unsigned long oldLastTick=lastTick;
+
   currentHour = h;
   currentMinute = m;
   currentSecond = s;
@@ -1677,7 +1747,13 @@ void handleSyncTime() {
   currentWeekday = wd;
   lastTick = millis();
   time_synchronized = true;
-  saveTimeSetting();
+  if (!saveTimeSetting()) {
+    currentHour=oldHour; currentMinute=oldMinute; currentSecond=oldSecond;
+    currentYear=oldYear; currentMonth=oldMonth; currentDay=oldDay; currentWeekday=oldWeekday;
+    time_synchronized=oldSynchronized; lastTick=oldLastTick;
+    sendJsonMessage(500, "error", "Time could not be saved to storage");
+    return;
+  }
 
   sendJsonMessage(200, "success", "Time synchronized");
 }
@@ -1779,6 +1855,7 @@ void handleGetStatus() {
   doc["apRemaining"] = apRemainingSec;
   doc["apClientConnected"] = (apStationCount > 0) ? 1 : 0;
   doc["freeHeap"] = ESP.getFreeHeap();
+  doc["storageOk"] = storageAvailable ? 1 : 0;
 
   String out;
   serializeJson(doc, out);
@@ -1787,29 +1864,64 @@ void handleGetStatus() {
 }
 
 void handleToggleManual() {
+  if (rejectIfFactoryResetPending()) return;
   if (!allowRequest(lastToggleManualRequest, 1500UL)) return;
 
-  // برای یک API JSON خالص، body لازم نیست. اگر body ارسال شود، فقط معتبر بودن JSON چک می‌شود.
+  String requestId;
+  int requestedOverride = -1;
   if (server.hasArg("plain") && server.arg("plain").length() > 0) {
-    StaticJsonDocument<128> ignored;
-    if (!parseJsonBody(ignored)) return;
+    StaticJsonDocument<192> body;
+    if (!parseJsonBody(body)) return;
+    requestId = requestIdFromDocument(body);
     bool payloadOk = false;
-    verifiedPayload(ignored, payloadOk);
+    JsonVariantConst payload = verifiedPayload(body, payloadOk);
     if (!payloadOk) return;
+    if (payload.is<JsonObjectConst>()) {
+      JsonObjectConst payloadObject = payload.as<JsonObjectConst>();
+      if (payloadObject.containsKey("override")) {
+        requestedOverride = payloadObject["override"] | -1;
+        if (requestedOverride != 0 && requestedOverride != 1) {
+          sendJsonMessage(400, "error", "Invalid manual override value");
+          return;
+        }
+      }
+    }
   }
 
-  if (manual_override == 0) {
-    manual_override = 1;
+  if (requestId.length() > 0 && requestId == lastManualRequestId && lastManualRequestOverride >= 0) {
+    StaticJsonDocument<160> cached;
+    cached["status"] = "success";
+    cached["override"] = lastManualRequestOverride;
+    cached["relay"] = (digitalRead(RELAY_PIN) == RELAY_ACTIVE_LEVEL) ? 1 : 0;
+    String cachedOut;
+    serializeJson(cached, cachedOut);
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", cachedOut);
+    return;
+  }
+
+  int previousOverride = manual_override;
+  if (requestedOverride >= 0) manual_override = requestedOverride;
+  else manual_override = (manual_override == 0) ? 1 : 0;
+
+  if (!saveOverrideSetting()) {
+    manual_override = previousOverride;
+    sendJsonMessage(500, "error", "Manual state could not be saved to storage");
+    return;
+  }
+  if (time_synchronized && !saveTimeSetting()) {
+    manual_override = previousOverride;
     saveOverrideSetting();
-    if (time_synchronized) saveTimeSetting();
-    delay(100);
-    checkScenarios();
-  } else {
-    manual_override = 0;
-    saveOverrideSetting();
-    if (time_synchronized) saveTimeSetting();
-    delay(100);
-    checkScenarios();
+    sendJsonMessage(500, "error", "Manual state time could not be saved to storage");
+    return;
+  }
+
+  delay(100);
+  checkScenarios();
+
+  if (requestId.length() > 0) {
+    lastManualRequestId = requestId;
+    lastManualRequestOverride = manual_override;
   }
 
   StaticJsonDocument<160> doc;
@@ -1823,6 +1935,7 @@ void handleToggleManual() {
 }
 
 void handleSaveAP() {
+  if (rejectIfFactoryResetPending()) return;
   if (!allowRequest(lastSaveApRequest, 3000UL)) return;
 
   StaticJsonDocument<320> doc;
@@ -1835,23 +1948,35 @@ void handleSaveAP() {
   const char* newPass = payload["pass"] | "";
   String ssidStr = String(newSsid);
   String passStr = String(newPass);
-
   if (ssidStr.length() == 0 || ssidStr.length() > 31 || passStr.length() < 8 || passStr.length() > 31) {
     sendJsonMessage(400, "error", "Invalid AP SSID or password length");
     return;
   }
 
+  char oldSsid[sizeof(custom_ssid)];
+  char oldPass[sizeof(custom_password)];
+  strncpy(oldSsid, custom_ssid, sizeof(oldSsid));
+  oldSsid[sizeof(oldSsid)-1] = '\0';
+  strncpy(oldPass, custom_password, sizeof(oldPass));
+  oldPass[sizeof(oldPass)-1] = '\0';
+
   ssidStr.toCharArray(custom_ssid, sizeof(custom_ssid));
   passStr.toCharArray(custom_password, sizeof(custom_password));
-  saveWiFiSettings();
-  saveTimeSetting();
+  if (!saveWiFiSettings() || !saveTimeSetting()) {
+    strncpy(custom_ssid, oldSsid, sizeof(custom_ssid));
+    strncpy(custom_password, oldPass, sizeof(custom_password));
+    saveWiFiSettings();
+    sendJsonMessage(500, "error", "AP settings could not be saved to storage");
+    return;
+  }
 
-  sendJsonMessage(200, "success", "AP settings saved; ESP32 will restart");
+  sendJsonMessage(200, "success", "AP settings saved; ESP8266 will restart");
   pendingReset = true;
   resetMillis = millis();
 }
 
 void handleSaveSTA() {
+  if (rejectIfFactoryResetPending()) return;
   if (!allowRequest(lastSaveStaRequest, 1500UL)) return;
 
   StaticJsonDocument<640> doc;
@@ -1865,7 +1990,6 @@ void handleSaveSTA() {
   bool newInternet = payload["internet"] | false;
   int onVal = payload["sta_on_minutes"] | -1;
   int offVal = payload["sta_off_minutes"] | -1;
-
   if (newStaSsid.length() > 31 || newStaPass.length() > 63) {
     sendJsonMessage(400, "error", "SSID or password too long");
     return;
@@ -1879,12 +2003,27 @@ void handleSaveSTA() {
     return;
   }
 
+  char oldSsid[sizeof(sta_ssid)];
+  char oldPass[sizeof(sta_password)];
+  strncpy(oldSsid, sta_ssid, sizeof(oldSsid));
+  oldSsid[sizeof(oldSsid)-1] = '\0';
+  strncpy(oldPass, sta_password, sizeof(oldPass));
+  oldPass[sizeof(oldPass)-1] = '\0';
+  bool oldInternet=internet_enabled;
+  int oldOn=staOnMinutes, oldOff=staOffMinutes;
+
   internet_enabled = newInternet;
   staOnMinutes = onVal;
   staOffMinutes = offVal;
   newStaSsid.toCharArray(sta_ssid, sizeof(sta_ssid));
   newStaPass.toCharArray(sta_password, sizeof(sta_password));
-  saveWiFiSettings();
+  if (!saveWiFiSettings()) {
+    internet_enabled=oldInternet; staOnMinutes=oldOn; staOffMinutes=oldOff;
+    strncpy(sta_ssid, oldSsid, sizeof(sta_ssid));
+    strncpy(sta_password, oldPass, sizeof(sta_password));
+    sendJsonMessage(500, "error", "STA settings could not be saved to storage");
+    return;
+  }
 
   ntp_synced_this_boot = false;
   ntpFirstCheckPending = true;
@@ -1901,6 +2040,7 @@ void handleSaveSTA() {
 }
 
 void handleSaveProtection() {
+  if (rejectIfFactoryResetPending()) return;
   if (!allowRequest(lastSaveProtectionRequest, 1000UL)) return;
 
   StaticJsonDocument<192> doc;
@@ -1915,12 +2055,22 @@ void handleSaveProtection() {
     return;
   }
 
+  int previous = antiShortCycleMinutes;
   antiShortCycleMinutes = value;
-  saveProtectionSettings();
+  if (!saveProtectionSettings()) {
+    antiShortCycleMinutes = previous;
+    sendJsonMessage(500, "error", "Protection settings could not be saved to storage");
+    return;
+  }
   sendJsonMessage(200, "success", "Protection settings saved");
 }
 
 void handleFactoryReset() {
+  if (pendingFactoryReset) {
+    sendJsonMessage(409, "error", "Factory reset is already in progress");
+    return;
+  }
+
   if (!allowRequest(lastFactoryResetRequest, 5000UL)) return;
 
   StaticJsonDocument<192> doc;
@@ -1936,27 +2086,33 @@ void handleFactoryReset() {
     return;
   }
 
+  // از همین لحظه کنترل سناریو و ذخیره‌های دوره‌ای باید متوقف شوند.
+  pendingFactoryReset = true;
+
   // برای ایمنی، قبل از ریست کامل حافظه رله خاموش و حالت دستی پاک می‌شود.
   manual_override = 0;
   setRelay(false);
   relayCurrentlyOnForStats = false;
+  lastRelayStatState = 0;
+  lastRelayOffMillis = millis();
 
   // ریست کامل حافظه فایل‌سیستم: سناریوها، زمان، آمار، تنظیمات WiFi، محافظت، override و NTP meta.
   bool ok = LittleFS.format();
   if (!ok) {
+    pendingFactoryReset = false;
     sendJsonMessage(500, "error", "LittleFS format failed");
     return;
   }
 
   sendJsonMessage(200, "success", "Factory reset done; restarting");
 
-  // مهم: در loop قبل از ریست دیگر saveTimeSetting انجام نشود، وگرنه پس از format دوباره فایل زمان ساخته می‌شود.
-  pendingFactoryReset = true;
+  // مهم: در loop قبل از ریست دیگر هیچ ذخیره‌ای انجام نمی‌شود، وگرنه پس از format فایل ساخته می‌شود.
   pendingReset = true;
   resetMillis = millis();
 }
 
 void handleSaveApCycle() {
+  if (rejectIfFactoryResetPending()) return;
   if (!allowRequest(lastSaveApCycleRequest, 1000UL)) return;
 
   StaticJsonDocument<320> doc;
@@ -1969,7 +2125,6 @@ void handleSaveApCycle() {
   int onVal = payload["on_minutes"] | -1;
   int offVal = payload["off_minutes"] | -1;
   int powerVal = payload["tx_power"] | -1;
-
   if (onVal < MIN_AP_CYCLE_MINUTES || onVal > MAX_AP_CYCLE_MINUTES ||
       offVal < MIN_AP_CYCLE_MINUTES || offVal > MAX_AP_CYCLE_MINUTES ||
       powerVal < 0 || powerVal > MAX_AP_TX_POWER_LEVEL) {
@@ -1977,15 +2132,25 @@ void handleSaveApCycle() {
     return;
   }
 
+  bool oldEnabled=apCycleEnabled, oldApOn=apCurrentlyOn;
+  int oldOn=apOnMinutes, oldOff=apOffMinutes, oldPower=apTxPowerLevel;
+  unsigned long oldToggle=apCycleLastToggleMillis;
+
   apCycleEnabled = enabled;
   apOnMinutes = onVal;
   apOffMinutes = offVal;
   apTxPowerLevel = powerVal;
   applyApTxPower();
-
   apCycleLastToggleMillis = millis();
   if (!apCurrentlyOn) setApRadioState(true);
 
-  saveWiFiSettings();
+  if (!saveWiFiSettings()) {
+    apCycleEnabled=oldEnabled; apOnMinutes=oldOn; apOffMinutes=oldOff;
+    apTxPowerLevel=oldPower; apCycleLastToggleMillis=oldToggle;
+    if (apCurrentlyOn != oldApOn) setApRadioState(oldApOn);
+    applyApTxPower();
+    sendJsonMessage(500, "error", "AP cycle settings could not be saved to storage");
+    return;
+  }
   sendJsonMessage(200, "success", "AP cycle settings saved");
 }
