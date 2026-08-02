@@ -213,6 +213,10 @@ unsigned long lastSaveApCycleRequest = 0;
 unsigned long lastFactoryResetRequest = 0;
 unsigned long lastStatusRequest = 0;
 
+// آخرین فرمان دستی پردازش‌شده؛ برای اینکه retry همان درخواست دوباره toggle نکند.
+String lastManualRequestId;
+int lastManualRequestOverride = -1;
+
 // ============ مدیریت ذخیره امن زمان (برای مقاومت در برابر نوسان برق) ============
 // به‌جای یک فایل، از دو فایل به صورت چرخشی (Round-Robin) استفاده می‌شود.
 // اگر برق درست وسط نوشتن یکی از فایل‌ها قطع شود، فایل دیگر همچنان سالم و قابل استفاده باقی می‌ماند.
@@ -280,6 +284,7 @@ void handleCorsOptions();
 bool parseJsonBody(JsonDocument &doc);
 String fnv1aChecksum(const String &data);
 JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok);
+String requestIdFromDocument(JsonDocument &doc);
 void checkScenarios();
 void updateClock();
 void setRelay(bool state);
@@ -389,6 +394,15 @@ JsonVariantConst verifiedPayload(JsonDocument &doc, bool &ok) {
   }
   // سازگاری با درخواست‌های قدیمی بدون handshake
   return doc.as<JsonVariantConst>();
+}
+
+// شناسه درخواست در envelope فقط برای جلوگیری از اجرای دوباره همان فرمان استفاده می‌شود.
+String requestIdFromDocument(JsonDocument &doc) {
+  if (!doc.is<JsonObjectConst>()) return "";
+  JsonObjectConst root = doc.as<JsonObjectConst>();
+  String id = String((const char*)(root["requestId"] | ""));
+  if (id.length() > 64) id = "";
+  return id;
 }
 
 // تابع کمکی برای سوئیچ کردن رله بر اساس منطق (Active-Low یا Active-High)
@@ -1789,27 +1803,53 @@ void handleGetStatus() {
 void handleToggleManual() {
   if (!allowRequest(lastToggleManualRequest, 1500UL)) return;
 
-  // برای یک API JSON خالص، body لازم نیست. اگر body ارسال شود، فقط معتبر بودن JSON چک می‌شود.
+  String requestId;
+  int requestedOverride = -1;
+  // برای سازگاری، body خالی و درخواست‌های قدیمی هنوز پذیرفته می‌شوند.
   if (server.hasArg("plain") && server.arg("plain").length() > 0) {
-    StaticJsonDocument<128> ignored;
-    if (!parseJsonBody(ignored)) return;
+    StaticJsonDocument<192> body;
+    if (!parseJsonBody(body)) return;
+    requestId = requestIdFromDocument(body);
     bool payloadOk = false;
-    verifiedPayload(ignored, payloadOk);
+    JsonVariantConst payload = verifiedPayload(body, payloadOk);
     if (!payloadOk) return;
+    if (payload.is<JsonObjectConst>()) {
+      JsonObjectConst payloadObject = payload.as<JsonObjectConst>();
+      if (payloadObject.containsKey("override")) {
+        requestedOverride = payloadObject["override"] | -1;
+        if (requestedOverride != 0 && requestedOverride != 1) {
+          sendJsonMessage(400, "error", "Invalid manual override value");
+          return;
+        }
+      }
+    }
   }
 
-  if (manual_override == 0) {
-    manual_override = 1;
-    saveOverrideSetting();
-    if (time_synchronized) saveTimeSetting();
-    delay(100);
-    checkScenarios();
-  } else {
-    manual_override = 0;
-    saveOverrideSetting();
-    if (time_synchronized) saveTimeSetting();
-    delay(100);
-    checkScenarios();
+  // retry همان عملیات باید همان پاسخ را بگیرد و دوباره وضعیت را عوض نکند.
+  if (requestId.length() > 0 && requestId == lastManualRequestId && lastManualRequestOverride >= 0) {
+    StaticJsonDocument<160> cached;
+    cached["status"] = "success";
+    cached["override"] = lastManualRequestOverride;
+    cached["relay"] = (digitalRead(RELAY_PIN) == RELAY_ACTIVE_LEVEL) ? 1 : 0;
+    String cachedOut;
+    serializeJson(cached, cachedOut);
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", cachedOut);
+    return;
+  }
+
+  // فرمان جدید ترجیحاً state مشخص می‌دهد؛ اگر body قدیمی/خالی باشد، رفتار toggle قبلی حفظ می‌شود.
+  if (requestedOverride >= 0) manual_override = requestedOverride;
+  else manual_override = (manual_override == 0) ? 1 : 0;
+
+  saveOverrideSetting();
+  if (time_synchronized) saveTimeSetting();
+  delay(100);
+  checkScenarios();
+
+  if (requestId.length() > 0) {
+    lastManualRequestId = requestId;
+    lastManualRequestOverride = manual_override;
   }
 
   StaticJsonDocument<160> doc;

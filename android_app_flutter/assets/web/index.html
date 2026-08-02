@@ -588,7 +588,15 @@ function apiUrl(path){ return normalizeBaseUrl(apiBase)+path; }
 function apiFetch(path, opts){ return fetch(apiUrl(path), opts); }
 function utf8Bytes(str){ if(window.TextEncoder){ return new TextEncoder().encode(str); } const enc=unescape(encodeURIComponent(str)); const arr=new Uint8Array(enc.length); for(let i=0;i<enc.length;i++) arr[i]=enc.charCodeAt(i); return arr; }
 function fnv1aChecksum(str){ let h=0x811c9dc5; const bytes=utf8Bytes(str); for(let i=0;i<bytes.length;i++){ h^=bytes[i]; h=Math.imul(h,0x01000193)>>>0; } return h.toString(16).padStart(8,'0'); }
-function postJson(path, body){ const payload=(body==null?{}:body); const serialized=JSON.stringify(payload); const envelope={payload:payload,checksum:fnv1aChecksum(serialized)}; return apiFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope)}); }
+function newRequestId(){
+  try{ if(window.crypto&&typeof window.crypto.randomUUID==='function') return window.crypto.randomUUID(); }catch(e){}
+  return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
+}
+function postJson(path, body, requestId){
+  const payload=(body==null?{}:body), serialized=JSON.stringify(payload);
+  const envelope={payload:payload,checksum:fnv1aChecksum(serialized),requestId:requestId||newRequestId()};
+  return apiFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(envelope)});
+}
 function showOperationModal(title,text,state){
   const modal=document.getElementById('progress-modal'), overlay=document.getElementById('custom-alert-overlay'), fill=document.getElementById('progress-bar-fill'), pct=document.getElementById('progress-percent'), titleEl=document.getElementById('progress-title'), textEl=document.getElementById('progress-text'), actionRow=document.getElementById('operation-action-row'), retryBtn=document.getElementById('operation-retry-btn'), cancelBtn=document.getElementById('operation-cancel-btn'), closeBtn=document.getElementById('operation-close-btn');
   titleEl.innerText=title||'در حال انجام عملیات...';
@@ -611,6 +619,8 @@ function startOperationTimer(){
     if(!activeOperation) return;
     activeOperation.timedOut=true;
     activeOperation.inFlight=false;
+    // پاسخ یک درخواست قدیمی، بعد از timeout یا retry نباید روی عملیات فعلی اثر بگذارد.
+    activeOperation.sendGeneration++;
     showOperationModal(activeOperation.title,'ارتباط با برد تا ۶۰ ثانیه برقرار نشد. درخواست هنوز انجام نشده است. می‌توانید دوباره تلاش کنید یا درخواست را لغو کنید.','timeout');
   },60000);
 }
@@ -626,12 +636,17 @@ function closeOperationModal(force){
 function cancelActiveOperation(){
   if(!activeOperation) { closeOperationModal(true); return; }
   clearOperationTimer();
+  // fetch قبلی را نمی‌توان روی برد لغو کرد؛ فقط پاسخ دیررس آن را بی‌اعتبار می‌کنیم.
+  activeOperation.sendGeneration++;
+  activeOperation.timedOut=true;
+  activeOperation.inFlight=false;
   activeOperation=null;
-  showOperationModal('درخواست لغو شد','درخواست انجام نشد و از حالت انتظار خارج شد.','error');
+  showOperationModal('درخواست لغو شد','درخواست دیگر از طرف اپ پیگیری نمی‌شود. اگر برد آن را قبلاً دریافت کرده باشد، پاسخ دیررس نادیده گرفته خواهد شد.','error');
   setTimeout(()=>closeOperationModal(true),1800);
 }
 function retryActiveOperation(){
   if(!activeOperation) return;
+  activeOperation.sendGeneration++;
   activeOperation.timedOut=false;
   activeOperation.inFlight=false;
   showOperationModal(activeOperation.title,'در حال تلاش دوباره برای ارتباط با برد...','queued');
@@ -644,7 +659,7 @@ function runBoardOperation(op){
     showOperationModal(activeOperation.title,'یک عملیات دیگر در حال انجام است. لطفاً تا پایان آن صبر کنید.','queued');
     return false;
   }
-  activeOperation=Object.assign({inFlight:false,timedOut:false},op);
+  activeOperation=Object.assign({inFlight:false,timedOut:false,requestId:newRequestId(),sendGeneration:0},op);
   showOperationModal(op.title,'در حال ارسال درخواست به برد...','sending');
   startOperationTimer();
   trySendActiveOperation();
@@ -652,33 +667,35 @@ function runBoardOperation(op){
 }
 function trySendActiveOperation(){
   if(!activeOperation || activeOperation.inFlight || activeOperation.timedOut) return;
-  const op=activeOperation;
+  const op=activeOperation, generation=++op.sendGeneration;
   op.inFlight=true;
   showOperationModal(op.title,'در حال انجام عملیات روی برد...','sending');
   let requestPromise;
-  try { requestPromise = postJson(op.path,op.payload||{}); }
+  try { requestPromise = postJson(op.path,op.payload||{},op.requestId); }
   catch(e) { requestPromise = Promise.reject(e); }
   requestPromise.then(async r=>{
     if(!r.ok){ let t=''; try{t=await r.text();}catch(e){} throw {server:true,message:t||('HTTP '+r.status)}; }
-    try{return await r.json();}catch(e){return {};}
+    let data;
+    try{ data=await r.json(); }catch(e){ throw {server:true,message:'Invalid JSON response'}; }
+    if(data && data.status && data.status!=='success') throw {server:true,message:data.message||'Operation failed'};
+    return data;
   }).then(data=>{
-    const doneOp=activeOperation;
-    if(!doneOp) return;
-    doneOp.inFlight=false;
+    if(activeOperation!==op || op.sendGeneration!==generation || op.timedOut) return;
+    op.inFlight=false;
     clearOperationTimer();
-    showOperationModal(doneOp.title,doneOp.successMessage||'عملیات با موفقیت انجام شد.','success');
-    try{ if(doneOp.onSuccess) doneOp.onSuccess(data); }catch(e){}
+    showOperationModal(op.title,op.successMessage||'عملیات با موفقیت انجام شد.','success');
+    try{ if(op.onSuccess) op.onSuccess(data); }catch(e){}
     activeOperation=null;
-    setTimeout(()=>closeOperationModal(true), doneOp.closeDelay||1800);
+    setTimeout(()=>closeOperationModal(true), op.closeDelay||1800);
   }).catch(err=>{
-    if(!activeOperation || activeOperation.timedOut) return;
-    activeOperation.inFlight=false;
+    if(activeOperation!==op || op.sendGeneration!==generation || op.timedOut) return;
+    op.inFlight=false;
     if(err && err.server){
       clearOperationTimer();
-      showOperationModal(activeOperation.title,activeOperation.errorMessage||'عملیات انجام نشد. برد پاسخ خطا داد.','error');
+      showOperationModal(op.title,op.errorMessage||'عملیات انجام نشد. برد پاسخ خطا داد.','error');
       activeOperation=null;
     } else {
-      showOperationModal(activeOperation.title,'ارتباط با برد برقرار نیست. درخواست نگه داشته شد و پس از اتصال دوباره ارسال می‌شود.','queued');
+      showOperationModal(op.title,'ارتباط با برد برقرار نیست. درخواست نگه داشته شد و پس از اتصال دوباره ارسال می‌شود.','queued');
       maybeAskWifiAssist(false);
     }
   });
@@ -734,7 +751,11 @@ function importScenarios(){ if(window.FlutterImport){ FlutterImport.postMessage(
 window.receiveScenarioImport=function(text){ try{ const parsed=JSON.parse(text); const data=Array.isArray(parsed)?parsed:parsed.scenarios; if(!Array.isArray(data)||data.length>20) throw new Error('format'); data.forEach(x=>{ if(!Number.isInteger(x.sh)||!Number.isInteger(x.sm)||!Number.isInteger(x.eh)||!Number.isInteger(x.em)||x.sh<0||x.sh>23||x.eh<0||x.eh>23||x.sm<0||x.sm>59||x.em<0||x.em>59||((x.sh*60+x.sm)===(x.eh*60+x.em))) throw new Error('data'); }); scenarios=data.map(x=>({sh:x.sh,sm:x.sm,eh:x.eh,em:x.em,en:x.en!==false,wd:Number.isInteger(x.wd)&&x.wd>=1&&x.wd<=127?x.wd:127,_dirty:true})); renderScenarios(); markDirty(); showModal('سناریوها از فایل خوانده شدند. برای اعمال روی برد، دکمه «ذخیره و پیاده‌سازی برنامه‌ها» را بزنید.'); }catch(e){ showModal('فایل پشتیبان معتبر نیست یا با این برنامه سازگار نیست.'); } }
 function loadSettings(){ settingsLoading=true; if(!scenariosDirty){ scenarioListMessage('در حال دریافت تنظیمات و سناریوها از برد...','loading'); } const ctrl=new AbortController(); const tid=setTimeout(()=>ctrl.abort(),5000); apiFetch('/settings?t='+Date.now(),{signal:ctrl.signal}).then(r=>{ clearTimeout(tid); if(!r.ok) throw new Error('HTTP '+r.status); return r.json();}).then(s=>{ document.getElementById('brand-name').textContent=s.programName||'کولر هوشمند ESP32'; document.getElementById('brand-sub').textContent=s.programTagline||'ESP32 · TIMER HUB'; const ap=s.ap||{}, sta=s.sta||{}, pr=s.protection||{}; if(ap.ssid) localStorage.setItem('esp32ApSsid',ap.ssid); if(ap.password) localStorage.setItem('esp32ApPass',ap.password); document.getElementById('ap-ssid').value=ap.ssid||''; document.getElementById('wifi-pass').value=ap.password||''; document.getElementById('ap-cycle-enabled').checked=!!ap.cycleEnabled; setSwitch('ap-cycle-switch',!!ap.cycleEnabled); document.getElementById('ap-on-minutes').value=ap.onMinutes||10; document.getElementById('ap-off-minutes').value=ap.offMinutes||5; buildPowerButtons(Number.isInteger(ap.txPowerLevel)?ap.txPowerLevel:3); document.getElementById('internet-enabled').checked=!!sta.internetEnabled; setSwitch('internet-switch',!!sta.internetEnabled); document.getElementById('sta-ssid').value=sta.ssid||''; document.getElementById('sta-pass').value=sta.password||''; document.getElementById('sta-on-minutes').value=sta.onMinutes||10; document.getElementById('sta-off-minutes').value=sta.offMinutes??0; document.getElementById('min-off').value=pr.minOffMinutes??3; if(scenariosDirty){settingsLoading=false;settingsEverLoaded=true;clearSettingsDirty();lastSettingsLoadTime=new Date();updateRefreshTimeLabel();showToast('تنظیمات به‌روز شد، اما سناریوهای محلی حفظ شدند','good');}else{scenarios=(s.scenarios||[]).map(x=>({sh:x.sh,sm:x.sm,eh:x.eh,em:x.em,en:x.en!==false,wd:x.wd||127}));settingsLoading=false;settingsEverLoaded=true;clearDirty();clearSettingsDirty();lastSettingsLoadTime=new Date();updateRefreshTimeLabel();} }).catch((e)=>{ settingsLoading=false; if(!settingsEverLoaded && scenarios.length===0){ scenarioListMessage('دریافت سناریوها از برد ناموفق بود. اتصال به برد یا آدرس API را بررسی کنید.','error'); } else if(scenarios.length>0){ renderScenarios(); } showToast('خطا در دریافت تنظیمات/سناریوها از برد','bad'); }); }
 function syncTime(){ let now=new Date(); const wd=(now.getDay()+1)%7; runBoardOperation({title:'همگام‌سازی ساعت',path:'/sync',payload:{h:now.getHours(),m:now.getMinutes(),s:now.getSeconds(),y:now.getFullYear(),mon:now.getMonth()+1,d:now.getDate(),wd},successMessage:'ساعت داخلی دستگاه با موفقیت همگام‌سازی شد.',onSuccess:()=>fetchStatus()}); }
-function toggleManual(){ runBoardOperation({title:'فرمان دستی کولر',path:'/toggle-manual',payload:{},successMessage:'فرمان دستی با موفقیت روی برد اعمال شد.',onSuccess:()=>fetchStatus()}); }
+function toggleManual(){
+  const currentlyManual=currentStatus && (currentStatus.override===1 || currentStatus.override===true);
+  const targetOverride=currentlyManual?0:1;
+  runBoardOperation({title:'فرمان دستی کولر',path:'/toggle-manual',payload:{override:targetOverride},successMessage:'فرمان دستی با موفقیت روی برد اعمال شد.',onSuccess:()=>fetchStatus()});
+}
 function saveScenariosForm(event){ event.preventDefault(); if(!validateScenarios()) return false; const valid=scenarioRowsToData().sort((a,b)=>(a.sh*60+a.sm)-(b.sh*60+b.sm)); runBoardOperation({title:'ذخیره سناریوها',path:'/save',payload:valid,successMessage:'سناریوها با موفقیت روی برد ذخیره شدند.',closeDelay:1800,onSuccess:()=>{clearDirty(); loadSettings(); fetchStatus();}}); return false; }
 function saveApForm(e){ e.preventDefault(); const ssid=document.getElementById('ap-ssid').value.trim(), pass=document.getElementById('wifi-pass').value; if(!ssid||pass.length<8){ showModal('رمز شبکه (AP) خود برد باید حداقل ۸ کاراکتر باشد.'); return false; } clearSettingsDirty(); runBoardOperation({title:'ذخیره تنظیمات فرستنده',path:'/save-ap',payload:{ssid,pass},successMessage:'تنظیمات فرستنده ذخیره شد. برد در حال راه‌اندازی مجدد است.',closeDelay:2500,onSuccess:()=>{waitingWifiReboot=true;}}); return false; }
 function saveStaForm(e){ e.preventDefault(); const pass=document.getElementById('sta-pass').value; const on=Number(document.getElementById('sta-on-minutes').value), off=Number(document.getElementById('sta-off-minutes').value); if(pass.length>0&&pass.length<8){ showModal('رمز وای‌فای مودم اگر وارد شود باید حداقل ۸ کاراکتر باشد.'); return false; } if(!isInt(on,1,1440)||!isInt(off,0,1440)){ showModal('زمان روشن بودن STA باید ۱ تا ۱۴۴۰ و زمان خاموش بودن ۰ تا ۱۴۴۰ دقیقه باشد.'); return false; } runBoardOperation({title:'ذخیره تنظیمات مودم / اینترنت',path:'/save-sta',payload:{internet:document.getElementById('internet-enabled').checked,sta_ssid:document.getElementById('sta-ssid').value.trim(),sta_pass:pass,sta_on_minutes:on,sta_off_minutes:off},successMessage:'تنظیمات مودم / اینترنت با موفقیت ذخیره شد.',onSuccess:()=>{clearSettingsDirty(); fetchStatus();}}); return false; }
