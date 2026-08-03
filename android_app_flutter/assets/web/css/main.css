@@ -307,3 +307,20 @@
     <input id="wifi-assist-pass" value="12345678" inputmode="text" autocomplete="off" placeholder="رمز وای‌فای برد">
     <button class="api-save" style="width:100%;margin-bottom:10px;padding:12px;border-radius:12px;border:none;font-family:var(--font-fa);font-weight:800;" onclick="saveWifiAssistFromModal()">ذخیره و اجازه اتصال خودکار</button>
     <div class="api-modal-actions">
+
+/* Responsive layout: preserve the original mobile styling while giving tablets
+   and wide screens comfortable spacing and readable card widths. */
+@media (min-width: 481px) {
+  body { padding: 20px; }
+  .app-shell, .page, .topbar, .bottom-nav { max-width: 920px; margin-left: auto; margin-right: auto; }
+  .page { padding-bottom: 110px; }
+  .panel { border-radius: 24px; }
+  .scenario-grid, .stats-grid, .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hero { min-height: 220px; }
+}
+@media (min-width: 900px) {
+  body { padding: 28px; }
+  .app-shell, .page, .topbar { max-width: 1120px; }
+  .scenario-grid, .stats-grid, .settings-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .bottom-nav { max-width: 760px; }
+}
