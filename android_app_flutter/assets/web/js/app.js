@@ -104,6 +104,7 @@ let activeOperation = null;
 let activeOperationTimer = null;
 let statusFetchInFlight = false;
 let _statusMutex = false; // Mutex ساده برای جلوگیری از race condition در fetchStatus
+let activeDialog = null; // فقط یک دیالوگ سفارشی هم‌زمان مجاز است
 let lastSignalRequestAt = 0;
 let waitingWifiReboot = false, wifiRebootSeenDisconnect = false;
 
@@ -224,8 +225,8 @@ function trySendActiveOperation(){
     }
   });
 }
-function showModal(msg){ document.getElementById('custom-alert-text').innerText=msg; document.getElementById('custom-alert-overlay').style.display='block'; document.getElementById('custom-alert').style.display='block'; }
-function closeAlert(){ document.getElementById('custom-alert-overlay').style.display='none'; document.getElementById('custom-alert').style.display='none'; }
+function showModal(msg){ if(activeDialog && activeDialog!=='alert') return; activeDialog='alert'; document.getElementById('custom-alert-text').innerText=msg; document.getElementById('custom-alert-overlay').style.display='block'; document.getElementById('custom-alert').style.display='block'; }
+function closeAlert(){ document.getElementById('custom-alert-overlay').style.display='none'; document.getElementById('custom-alert').style.display='none'; if(activeDialog==='alert') activeDialog=null; }
 function openApiModal(){ document.getElementById('api-base-input').value=apiBase; document.getElementById('wifi-assist-ssid').value=localStorage.getItem('esp32ApSsid')||'ESP32_Timer_Hub'; document.getElementById('wifi-assist-pass').value=localStorage.getItem('esp32ApPass')||'12345678'; document.getElementById('custom-alert-overlay').style.display='block'; document.getElementById('api-modal').style.display='block'; }
 function closeApiModal(){ document.getElementById('api-modal').style.display='none'; document.getElementById('custom-alert-overlay').style.display='none'; }
 function saveApiBaseFromModal(){ apiBase=normalizeBaseUrl(document.getElementById('api-base-input').value); localStorage.setItem('esp32ApiBase',apiBase); closeApiModal(); resetActivity(); if(scenariosDirty){showToast('سناریوهای محلی حفظ شدند. برای دریافت سناریوهای برد جدید، دکمه ↻ را بزنید.','warn');} loadSettings(); fetchStatus(); showToast('آدرس اتصال ذخیره شد: '+apiBase,'good'); }
@@ -278,8 +279,8 @@ function markDirty(){ if(scenariosDirty) return; scenariosDirty=true; document.q
 function clearDirty(){ scenariosDirty=false; scenarios.forEach(s=>delete s._dirty); const btn=document.querySelector('.save-btn'); if(btn){ btn.style.background=''; btn.style.color=''; } renderScenarios(); updateDisconnectedDirtyNote(); if(currentStatus&&currentStatus.sync===1&&currentStatus.override===0) highlightScenarios(currentStatus.time,currentStatus.weekday); }
 function markSettingsDirty(){ settingsDirty=true; }
 function clearSettingsDirty(){ settingsDirty=false; }
-function showConfirm(msg,onYes){ _confirmCallback=onYes; document.getElementById('custom-confirm-text').innerText=msg; document.getElementById('custom-alert-overlay').style.display='block'; document.getElementById('custom-confirm').style.display='block'; }
-function closeConfirm(yes){ document.getElementById('custom-confirm').style.display='none'; document.getElementById('custom-alert-overlay').style.display='none'; if(yes && _confirmCallback) _confirmCallback(); _confirmCallback=null; }
+function showConfirm(msg,onYes){ if(activeDialog) return; activeDialog='confirm'; _confirmCallback=onYes; document.getElementById('custom-confirm-text').innerText=msg; document.getElementById('custom-alert-overlay').style.display='block'; document.getElementById('custom-confirm').style.display='block'; }
+function closeConfirm(yes){ document.getElementById('custom-confirm').style.display='none'; document.getElementById('custom-alert-overlay').style.display='none'; const callback=_confirmCallback; _confirmCallback=null; activeDialog=null; if(yes && callback) callback(); }
 function refreshScenariosFromBoard(){ if(!scenariosDirty){ loadSettings(); return; } showConfirm('تغییرات ذخیره‌نشده‌ای دارید. با دریافت مجدد از برد، تغییرات فعلی پاک می‌شود. ادامه می‌دهید؟',()=>{ scenariosDirty=false; loadSettings(); }); }
 function addScenario(){ if(settingsLoading && !scenariosDirty){ showModal('در حال دریافت آخرین سناریوها از برد هستیم؛ چند لحظه صبر کنید.'); return; } if(scenarios.length>=20){ showModal('حداکثر ظرفیت مجاز (۲۰ سناریو) را اضافه کرده‌اید.'); return; } scenarios.unshift({sh:0,sm:0,eh:1,em:0,en:true,wd:127,_isNew:true,_dirty:true}); renderScenarios(false); markDirty(); setTimeout(()=>{ const newCard=document.querySelector('.scenario-card.scenario-new'); if(newCard) newCard.scrollIntoView({behavior:'smooth',block:'center'}); },120); setTimeout(()=>{ scenarios.forEach(s=>s._isNew=false); document.querySelectorAll('.scenario-card.scenario-new').forEach(card=>{ card.classList.remove('scenario-new'); const badge=card.querySelector('.badge-new'); if(badge) badge.remove(); }); },5000); }
 function removeScenario(i){ showConfirm('آیا از حذف سناریو '+(i+1)+' مطمئن هستید؟',()=>{ scenarios.splice(i,1); renderScenarios(false); markDirty(); }); }
