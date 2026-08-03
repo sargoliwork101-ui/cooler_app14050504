@@ -42,6 +42,9 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> wit
   bool _loading = true;
   bool _wifiDialogOpen = false;
 
+  // محافظت از race condition روی متغیرهای static-like
+  static bool _isWifiDialogOpen = false;
+
   @override
   void initState() {
     super.initState();
@@ -182,13 +185,13 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> wit
       return;
     }
 
-    if (_wifiDialogOpen || !mounted) return;
+    if (_isWifiDialogOpen || _wifiDialogOpen || !mounted) return;
     await _showConnectWifiDialog(targetSsid, targetPass, currentSsid);
   }
 
   Future<void> _showAlreadyOnBoardWifiDialog(String ssid) async {
-    if (_wifiDialogOpen || !mounted) return;
-    _wifiDialogOpen = true;
+    if (_isWifiDialogOpen || _wifiDialogOpen || !mounted) return;
+    _isWifiDialogOpen = _wifiDialogOpen = true;
     await showDialog<void>(
       context: context,
       builder: (ctx) => Directionality(
@@ -203,12 +206,12 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> wit
         ),
       ),
     );
-    _wifiDialogOpen = false;
+    _isWifiDialogOpen = _wifiDialogOpen = false;
   }
 
   Future<void> _showConnectWifiDialog(String defaultSsid, String defaultPass, String currentSsid) async {
-    if (_wifiDialogOpen || !mounted) return;
-    _wifiDialogOpen = true;
+    if (_isWifiDialogOpen || _wifiDialogOpen || !mounted) return;
+    _isWifiDialogOpen = _wifiDialogOpen = true;
 
     final ssidController = TextEditingController(text: defaultSsid);
     final passController = TextEditingController(text: defaultPass);
@@ -260,7 +263,7 @@ class _SmartCoolerWebViewScreenState extends State<SmartCoolerWebViewScreen> wit
     final pass = passController.text;
     ssidController.dispose();
     passController.dispose();
-    _wifiDialogOpen = false;
+    _isWifiDialogOpen = _wifiDialogOpen = false;
 
     if (shouldConnect == true && ssid.isNotEmpty) {
       await _controller.runJavaScript("localStorage.setItem('esp32WifiAutoApproved','1');");
