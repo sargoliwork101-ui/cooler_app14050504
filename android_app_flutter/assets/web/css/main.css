@@ -1,0 +1,309 @@
+  <style>
+    /* ===== پالت رنگی گالری (طرح a) ===== */
+    :root{
+      --font-fa:'Vazirmatn',-apple-system,sans-serif;
+      --font-mono:'Vazirmatn',-apple-system,sans-serif;
+      --bg:#0a0c0d; --panel:#1b1f21; --panel-2:#15181a; --line:rgba(255,255,255,.08); --line-strong:rgba(255,255,255,.14);
+      --accent:#1de9c4; --accent-dim:rgba(29,233,196,.16); --on-accent:#00201b;
+      --on:#1de9c4; --on-dim:rgba(29,233,196,.16); --off:#ff5468; --off-dim:rgba(255,84,104,.14);
+      --warn:#f2a93b; --warn-dim:rgba(242,169,59,.14); --cyan:#29d3c8; --on-cyan:#04201d;
+      --scenario-live:#3ddc84; --scenario-live-dim:rgba(61,220,132,.14); --scenario-next:#f5d020; --scenario-next-dim:rgba(245,208,32,.16);
+      --text:#eef0f1; --text-dim:#868c90; --text-faint:#585c5f; --nav-bg:rgba(15,18,19,.92); --panel-radius:14px; --btn-radius:12px;
+    }
+    *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+    body{margin:0; background:#000; color:var(--text); font-family:var(--font-fa); display:flex; flex-direction:column; align-items:center;}
+
+    /* ===== فریم گوشی ===== */
+    .phone{width:100%; min-height:100vh; background:var(--bg); color:var(--text); display:flex; position:relative; border-left:1px solid var(--line); border-right:1px solid var(--line);}
+    .phone.col{flex-direction:column;}
+    .phone.row{flex-direction:row;}
+    .main-col{flex:1; display:flex; flex-direction:column; min-width:0;}
+
+    /* ===== نوار بالا ===== */
+    .topbar{padding:16px 18px; position:sticky; top:0; z-index:20; background:var(--bg); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:1px solid var(--line);}
+    .top-row{display:flex; align-items:center; justify-content:space-between;}
+    .brand-name{font-weight:800; font-size:1rem;}
+    .brand-sub{font-family:var(--font-mono); font-size:.66rem; color:var(--text-faint); letter-spacing:.4px;}
+    .conn-badge{display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:99px; font-size:.7rem; font-weight:700; background:var(--accent-dim); color:var(--accent); font-family:var(--font-mono);}
+    .conn-badge .dot{width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); animation:pulse 1.8s infinite;}
+    @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+    .conn-badge.connected{background:var(--on-dim); color:var(--on); box-shadow:0 0 8px var(--on-dim);}
+    .conn-badge.connected .dot{background:var(--on); box-shadow:0 0 10px var(--on);}
+    .conn-badge.disconnected{background:var(--off-dim); color:var(--off); box-shadow:0 0 8px var(--off-dim);}
+    .conn-badge.disconnected .dot{background:var(--off); box-shadow:0 0 10px var(--off);}
+    .conn-badge.connecting{background:var(--warn-dim); color:var(--warn); box-shadow:0 0 8px var(--warn-dim);}
+    .conn-badge.connecting .dot{background:var(--warn); box-shadow:0 0 10px var(--warn);}
+
+    /* ===== نشانگر وضعیت سه‌حالته (نارنجی=درحال اتصال، سبز=وصل، قرمز=قطع) برای متن‌های وضعیت اتصال ===== */
+    .status-connecting{color:var(--warn)!important;}
+    .status-connected{color:var(--scenario-live)!important;}
+    .status-disconnected{color:var(--off)!important;}
+
+    /* ===== نوتیفیکیشن کوتاه (Toast) برای اطلاع فوری قطع/وصل شدن مودم، بدون نیاز به تایید کاربر ===== */
+    #toast-wrap{position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:10500; display:flex; flex-direction:column; gap:8px; align-items:center; width:92%; max-width:400px; pointer-events:none;}
+    .toast{padding:11px 18px; border-radius:12px; font-size:.82rem; font-weight:700; text-align:center; box-shadow:0 10px 26px rgba(0,0,0,.45); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); opacity:0; transform:translateY(-10px); transition:opacity .25s ease, transform .25s ease; max-width:100%;}
+    .toast.show{opacity:1; transform:translateY(0);}
+    .toast.toast-warn{background:var(--warn-dim); color:var(--warn); border:1px solid var(--warn);}
+    .toast.toast-good{background:var(--on-dim); color:var(--on); border:1px solid var(--on);}
+    .toast.toast-bad{background:var(--off-dim); color:var(--off); border:1px solid var(--off);}
+
+    /* ===== آمار سوییچ / مدت‌کارکرد رله (پایش سلامت کمپرسور) ===== */
+    .stat-row{display:flex; gap:8px;}
+    .stat-box{flex:1; background:var(--panel-2); border-radius:9px; padding:12px 10px; text-align:center; box-shadow:4px 4px 10px rgba(0,0,0,.45), -3px -3px 8px rgba(255,255,255,.03);}
+    .stat-value{font-family:var(--font-mono); font-size:1.15rem; font-weight:800; color:var(--accent);}
+    .stat-lbl{font-size:.68rem; color:var(--text-dim); margin-top:4px;}
+
+    /* ===== صفحات (تب‌ها) ===== */
+    .pages{flex:1; width:100%; position:relative; overflow:hidden;}
+    .page{position:absolute; top:0; left:0; width:100%; height:100%; padding:20px 18px 100px; overflow-y:auto; box-sizing:border-box; will-change:transform; -webkit-overflow-scrolling:touch;}
+    .page.active{display:block;}
+    @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+
+    /* ===== کارت / پنل (سبک نئومورف گالری) ===== */
+    .panel{position:relative; background:var(--panel); border:1px solid var(--line); border-radius:var(--panel-radius); padding:18px; margin-bottom:14px; box-shadow:7px 7px 15px rgba(0,0,0,.5), -5px -5px 11px rgba(255,255,255,.03);}
+    .panel.rivets::before,.panel.rivets::after{content:''; position:absolute; top:9px; width:4px; height:4px; border-radius:50%; background:var(--line-strong);}
+    .panel.rivets::before{right:9px;} .panel.rivets::after{left:9px;}
+    .panel-label{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+    .panel-label h3{margin:0; font-size:.8rem; font-weight:700; color:var(--text-dim); letter-spacing:.3px; display:flex; align-items:center; gap:8px;}
+    .panel-label h3.bar::before{content:''; width:3px; height:14px; background:var(--accent); border-radius:2px; display:inline-block;}
+
+    /* ===== هیرو (حلقه + فن) ===== */
+    .hero{display:flex; flex-direction:column; align-items:center; padding:22px 18px 20px;}
+    .ring-wrap{position:relative; width:126px; height:126px; margin-bottom:14px;}
+    .ring-wrap svg.ring{width:100%; height:100%; transform:rotate(-90deg);}
+    .ring-bg{fill:none; stroke:var(--line); stroke-width:5;}
+    .ring-fg{fill:none; stroke:var(--on); stroke-width:5; stroke-linecap:round; stroke-dasharray:380; stroke-dashoffset:55; filter:drop-shadow(0 0 5px var(--on));}
+    .ring-center{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;}
+    .fan-icon{width:36px; height:36px; color:var(--on);}
+    .fan-icon .blade-group{transform-origin:12px 12px; animation:spin 1.1s linear infinite;}
+    @keyframes spin{100%{transform:rotate(360deg);}}
+
+    /* تصویر اختصاصی کولر: بدنه سه‌بعدی، پرهٔ متحرک و جریان هوای نورانی */
+    .ring-wrap{width:156px;height:156px;margin-bottom:10px;}
+    .ring{opacity:.55;}
+    .cooler-art{width:146px;height:146px;overflow:visible;}
+    .cooler-art .cooler-body{fill:#222a2d;stroke:#506065;stroke-width:1.3;filter:drop-shadow(0 12px 10px rgba(0,0,0,.52));}
+    .cooler-art .cooler-top{fill:#303c40;stroke:#647277;stroke-width:1;}
+    .cooler-art .grille{fill:#111719;stroke:#5c6a6d;stroke-width:1.4;}
+    .cooler-art .grille-line{stroke:#526166;stroke-width:1.2;opacity:.85;}
+    .cooler-art .fan-blades{transform-origin:73px 72px;animation:coolerSpin 1.15s linear infinite;}
+    .cooler-art .blade{fill:var(--on);filter:drop-shadow(0 0 3px var(--on));}
+    .cooler-art .hub{fill:#b9fff2;stroke:#0d8e78;stroke-width:2;}
+    .cooler-art .air{fill:none;stroke:var(--on);stroke-width:2.1;stroke-linecap:round;opacity:.78;filter:drop-shadow(0 0 4px var(--on));animation:airFlow 1.4s ease-in-out infinite;}
+    .cooler-art .air.a2{animation-delay:.25s}.cooler-art .air.a3{animation-delay:.5s}
+    .cooler-art .led{fill:var(--on);filter:drop-shadow(0 0 5px var(--on));}
+    @keyframes coolerSpin{to{transform:rotate(360deg)}}
+    @keyframes airFlow{0%,100%{opacity:.15;transform:translateX(-3px)}50%{opacity:1;transform:translateX(4px)}}
+    .hero.off .cooler-art .fan-blades{animation:none}.hero.off .cooler-art .blade,.hero.off .cooler-art .led{fill:var(--text-faint);filter:none}.hero.off .cooler-art .air{display:none}.hero.off .cooler-art .cooler-body{fill:#202426;stroke:#3b4245;}
+    .hero.disconnected .cooler-art .fan-blades{animation:none}.hero.disconnected .cooler-art .blade,.hero.disconnected .cooler-art .led{fill:var(--off);filter:none}.hero.disconnected .cooler-art .air{display:none;}
+    .status-word{font-weight:800; font-size:1.02rem; margin-top:2px;}
+    .status-sub{font-family:var(--font-mono); font-size:.7rem; color:var(--text-dim); margin-top:4px;}
+    .manual-btn{width:100%; padding:14px; border-radius:var(--btn-radius); border:1px solid var(--off-dim); background:var(--off-dim); color:var(--off); font-family:var(--font-fa); font-weight:700; font-size:.92rem; cursor:pointer; margin-top:14px;}
+    .manual-btn.isoff{border-color:var(--on-dim); background:var(--on-dim); color:var(--on);}
+
+    /* حالت‌های هیرو بر اساس وضعیت رله / ارتباط */
+    .hero.off .ring-fg{stroke:var(--text-faint); filter:none;}
+    .hero.off .fan-icon{color:var(--text-faint);}
+    .hero.off .fan-icon .blade-group{animation:none;}
+    .hero.disconnected .ring-fg{stroke:var(--off); filter:drop-shadow(0 0 5px var(--off));}
+    .hero.disconnected .fan-icon{color:var(--off);}
+    .hero.disconnected .fan-icon .blade-group{animation:none;}
+    .hero.disconnected .status-word{color:var(--off);}
+
+    /* ===== ساعت داخلی برد ===== */
+    .clock-row{display:flex; align-items:center; justify-content:space-between; gap:12px;}
+    .clock-value{flex:1; text-align:center; font-family:var(--font-mono); font-size:1.4rem; font-weight:700; color:var(--cyan); letter-spacing:1px;}
+    .sync-btn{flex-shrink:0; padding:9px 14px; border-radius:9px; border:1px solid var(--line-strong); background:var(--panel-2); color:var(--text); font-family:var(--font-fa); font-size:.78rem; font-weight:700; cursor:pointer;}
+    .sync-note{margin-top:10px; font-size:.76rem; color:var(--on);}
+    .date-value{text-align:center;font-size:.78rem;color:var(--text-dim);margin-top:5px;font-family:var(--font-fa);}
+
+    .header-row{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+    .fab{width:32px; height:32px; border-radius:9px; background:var(--accent-dim); border:1px solid var(--accent); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:1.2rem; cursor:pointer; flex-shrink:0;}
+
+    /* ===== کارت سناریو ===== */
+    .scenario-card{position:relative; background:var(--panel-2); border-radius:12px; padding:13px; margin-bottom:9px; border:1px solid var(--line); border-right:3px solid var(--line-strong);}
+    .scenario-card.running{border-right-color:var(--scenario-live); background:var(--scenario-live-dim);}
+    .scenario-card.next{border-right-color:var(--scenario-next); background:var(--scenario-next-dim);}
+    .scenario-card.scenario-disabled{opacity:.42; border-style:dashed;}
+.scenario-card.error-conflict{border-color:var(--off)!important; border-right-color:var(--off)!important; box-shadow:0 0 16px rgba(255,84,104,.22)!important; background:var(--off-dim)!important; animation:cardShake .45s;}
+@keyframes cardShake{0%,100%{transform:translateX(0);}20%,60%{transform:translateX(-4px);}40%,80%{transform:translateX(4px);}}
+/* سناریوی جدید — درخشان سبز */
+.scenario-card.scenario-new{box-shadow:0 0 0 2px var(--scenario-live),0 0 18px rgba(61,220,132,.3),4px 4px 10px rgba(0,0,0,.45),-3px -3px 8px rgba(255,255,255,.03);animation:newPulse 1.5s ease-in-out 3;}
+@keyframes newPulse{0%,100%{box-shadow:0 0 0 2px var(--scenario-live),0 0 18px rgba(61,220,132,.3),4px 4px 10px rgba(0,0,0,.45),-3px -3px 8px rgba(255,255,255,.03);}50%{box-shadow:0 0 0 3px var(--scenario-live),0 0 28px rgba(61,220,132,.45),0 0 50px rgba(61,220,132,.12),4px 4px 10px rgba(0,0,0,.45),-3px -3px 8px rgba(255,255,255,.03);}}
+/* سناریوی در حال ویرایش */
+.scenario-card.scenario-active{box-shadow:0 0 0 2px var(--accent),0 0 12px var(--accent-dim),4px 4px 10px rgba(0,0,0,.45),-3px -3px 8px rgba(255,255,255,.03);}
+/* سناریوی تغییر یافته (ذخیره نشده) — فیروزه‌ای */
+.scenario-card.scenario-dirty{box-shadow:0 0 0 2px var(--cyan),0 0 12px rgba(41,211,200,.22),4px 4px 10px rgba(0,0,0,.45),-3px -3px 8px rgba(255,255,255,.03);}
+/* بَج‌ها */
+.badge-new{font-size:.6rem;padding:2px 7px;border-radius:99px;background:var(--scenario-live-dim);color:var(--scenario-live);font-family:var(--font-mono);font-weight:700;animation:badgePop .3s ease;}
+.badge-editing{font-size:.6rem;padding:2px 7px;border-radius:99px;background:var(--accent-dim);color:var(--accent);font-family:var(--font-mono);font-weight:700;}
+.badge-dirty{font-size:.6rem;padding:2px 7px;border-radius:99px;background:rgba(41,211,200,.16);color:var(--cyan);font-family:var(--font-mono);font-weight:700;}
+@keyframes badgePop{from{opacity:0;transform:scale(.7);}to{opacity:1;transform:scale(1);}}
+/* نمایشگر ساعت (قابل کلیک) */
+.time-display{width:100%;background:transparent;border:none;color:var(--text);font-family:var(--font-mono);font-size:1.02rem;font-weight:700;text-align:center;cursor:pointer;padding:4px 0;direction:ltr;transition:color .2s;}
+.time-box:active .time-display{color:var(--accent);}
+/* مودال انتخاب‌گر ساعت */
+#wheel-modal{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(15,18,19,.97);border:1px solid var(--line-strong);border-radius:22px;padding:22px 18px;z-index:10005;box-shadow:0 24px 70px rgba(0,0,0,.7);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);width:92%;max-width:340px;text-align:center;}
+#wheel-modal h3{margin:0 0 14px;color:var(--accent);font-size:.92rem;}
+.wheel-wrap{display:flex;gap:6px;justify-content:center;align-items:center;margin:0 auto;max-width:260px;direction:ltr;}
+.wheel-col{position:relative;width:90px;height:200px;overflow:hidden;touch-action:none;-webkit-overflow-scrolling:none;}
+.wheel-col::before,.wheel-col::after{content:'';position:absolute;left:0;right:0;height:64px;z-index:3;pointer-events:none;}
+.wheel-col::before{top:0;background:linear-gradient(to bottom,rgba(15,18,19,1),rgba(15,18,19,0));}
+.wheel-col::after{bottom:0;background:linear-gradient(to top,rgba(15,18,19,1),rgba(15,18,19,0));}
+.wheel-band{position:absolute;top:50%;left:0;right:0;height:40px;transform:translateY(-50%);background:var(--accent-dim);border:1px solid var(--accent);border-radius:10px;z-index:1;pointer-events:none;}
+.wheel-inner{position:absolute;left:0;right:0;will-change:transform;}
+.wheel-item{height:40px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:1.05rem;font-weight:600;color:var(--text-faint);cursor:pointer;user-select:none;-webkit-user-select:none;transition:color .15s,font-size .15s;}
+.wheel-item.active{color:var(--accent);font-size:1.22rem;font-weight:800;}
+.wheel-sep{font-family:var(--font-mono);font-size:1.6rem;font-weight:800;color:var(--accent);margin:0 2px;flex-shrink:0;}
+.wheel-labels{display:flex;justify-content:center;gap:96px;margin-top:8px;direction:ltr;}
+.wheel-labels span{font-size:.68rem;color:var(--text-faint);}
+.wheel-actions{display:flex;gap:10px;justify-content:center;margin-top:18px;}
+.wheel-actions button{flex:1;max-width:130px;padding:12px;border-radius:12px;border:none;font-family:var(--font-fa);font-weight:800;font-size:.88rem;cursor:pointer;}
+.wheel-ok{background:var(--accent);color:var(--on-accent);}
+.wheel-cancel{background:var(--panel-2);color:var(--text-dim);border:1px solid var(--line-strong)!important;}
+    .scenario-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:11px;}
+    .scenario-name{font-weight:700; font-size:.85rem; display:flex; align-items:center; gap:7px;}
+    .badge-live{font-size:.6rem; padding:2px 7px; border-radius:99px; background:var(--scenario-live-dim); color:var(--scenario-live); font-family:var(--font-mono); font-weight:700;}
+    .badge-next{font-size:.6rem; padding:2px 7px; border-radius:99px; background:var(--scenario-next-dim); color:var(--scenario-next); font-family:var(--font-mono); font-weight:700;}
+    .scenario-actions{display:flex; align-items:center; gap:9px;}
+    .icon-btn{width:26px; height:26px; border-radius:7px; border:1px solid var(--line-strong); background:var(--panel); color:var(--text-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:.85rem;}
+    .icon-btn.danger:hover{background:var(--off-dim); color:var(--off); border-color:var(--off);}
+    .time-row{display:flex; gap:8px;}
+    .time-box{flex:1; background:var(--panel); border-radius:9px; padding:9px 10px; text-align:center;}
+    .time-box .lbl{font-size:.65rem; color:var(--text-faint); margin-bottom:3px;}
+    .time-box input{width:100%; background:transparent; border:none; color:var(--text); font-family:var(--font-mono); font-size:1.02rem; font-weight:700; text-align:center; outline:none; direction:ltr;}
+    .time-box input::-webkit-calendar-picker-indicator{filter:invert(.85); cursor:pointer;}
+    #scenarios-list{display:flex; flex-direction:column;}
+    .days-label{font-size:.68rem;color:var(--text-faint);margin:11px 0 6px;}
+    .days-row{display:flex;gap:4px;justify-content:space-between;direction:rtl;}
+    .day-btn{flex:1;min-width:0;padding:6px 1px;border-radius:7px;border:1px solid var(--line-strong);background:var(--panel);color:var(--text-dim);font-family:var(--font-fa);font-size:.66rem;font-weight:700;cursor:pointer;}
+    .day-btn.selected{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);}
+    .power-row{display:flex;gap:6px;direction:rtl;}
+    .power-btn{flex:1;min-width:0;padding:10px 4px;border-radius:9px;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text-dim);font-family:var(--font-fa);font-size:.72rem;font-weight:700;cursor:pointer;box-shadow:3px 3px 7px rgba(0,0,0,.45), -2px -2px 6px rgba(255,255,255,.03);}
+    .power-btn.selected{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);}
+    .save-btn{width:100%; padding:14px; border-radius:var(--btn-radius); border:none; margin-top:4px; background:var(--accent); color:var(--on-accent); font-weight:800; font-size:.92rem; cursor:pointer; transition:background .3s ease, color .3s ease;}
+
+    /* ===== بنرهای اطلاع‌رسانی تب سناریوها ===== */
+    .scenario-banner{background:var(--warn-dim); border:1px solid var(--warn); color:var(--warn); border-radius:10px; padding:10px 12px; font-size:.78rem; line-height:1.7; margin-bottom:12px; font-weight:600;text-align:center;}
+    .scenario-banner.disconnected-banner{background:var(--off-dim);border-color:var(--off);color:var(--off);animation:discoPulse 2s ease-in-out infinite;}
+@keyframes discoPulse{0%,100%{opacity:1;}50%{opacity:.7;}}
+    /* پشتیبان‌گیری/بازیابی محلی سناریوها */
+    .backup-row{display:flex;gap:8px;margin:-2px 0 7px;}
+    .backup-btn{flex:1;padding:10px 7px;border-radius:10px;font-family:var(--font-fa);font-size:.76rem;font-weight:700;cursor:pointer;text-align:center;display:flex;align-items:center;justify-content:center;}
+    .backup-btn.export{background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);}
+    .backup-btn.import{background:var(--cyan);border:1px solid var(--cyan);color:var(--on-cyan);}
+    .backup-note{font-size:.68rem;color:var(--text-faint);text-align:center;margin-bottom:13px;}
+    .file-input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;}
+
+    /* ===== فرم‌های وای‌فای ===== */
+    .field{margin-bottom:15px;}
+    .field label{display:block; font-size:.76rem; color:var(--text-dim); margin-bottom:6px; font-weight:600;}
+    .field input{width:100%; padding:12px 13px; border-radius:9px; border:1px solid var(--line-strong); background:var(--panel-2); color:var(--text); font-family:var(--font-mono); font-size:.86rem; direction:ltr; text-align:left;}
+    .password-container{position:relative; display:flex; align-items:center; width:100%;}
+    .password-container input{padding-left:50px!important;}
+    .toggle-password{position:absolute; left:10px; background:none; border:none; color:var(--text-dim); cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; width:34px; height:34px; box-shadow:none;}
+    .toggle-password:hover{color:var(--accent);}
+    .hint{font-size:.76rem; color:var(--text-dim); line-height:1.8; margin-bottom:14px;}
+    .wifi-btn{width:100%; padding:14px; border-radius:var(--btn-radius); border:none; background:var(--cyan); color:var(--on-cyan); font-weight:800; font-size:.92rem; cursor:pointer;}
+    #internet-wifi-status{font-size:.9rem; color:var(--text-dim); margin-bottom:16px;}
+
+    /* ===== کلید تگل (switch) ===== */
+    .switch{direction:ltr; width:38px; height:21px; border-radius:99px; position:relative; cursor:pointer; flex-shrink:0; transition:.25s; background:var(--panel-2); border:1px solid var(--line-strong);}
+    .switch .knob{position:absolute; top:2px; left:2px; width:15px; height:15px; border-radius:50%; background:var(--text-faint); transition:.25s;}
+    .switch.on{background:var(--on-dim); border-color:var(--on);}
+    .switch.on .knob{transform:translateX(17px); background:var(--on); box-shadow:0 0 6px var(--on);}
+
+    /* ===== ناوبری شناور مدور (orbit) ===== */
+    .nav-orbit{position:fixed; bottom:16px; left:50%; transform:translateX(-50%); width:calc(100% - 44px); max-width:380px; display:flex; align-items:flex-end; justify-content:space-around; background:var(--nav-bg); border:1px solid var(--line-strong); border-radius:28px; padding:10px 12px 12px; z-index:30; box-shadow:0 14px 34px rgba(0,0,0,.55);}
+    .nav-orbit .nav-btn{display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px; border-radius:50%; cursor:pointer; color:var(--text-faint); background:none; border:none; transition:transform .3s cubic-bezier(.34,1.56,.64,1), background .3s, color .3s, box-shadow .3s; font-family:var(--font-fa);}
+    .nav-orbit .nav-btn svg{width:19px; height:19px;}
+    .nav-orbit .nav-btn span{font-size:.6rem; font-weight:700;}
+    .nav-orbit .nav-btn.active{color:var(--on-accent); background:var(--accent); transform:translateY(-14px) scale(1.16); box-shadow:0 10px 22px var(--accent-dim), 0 0 0 5px var(--bg);}
+    .nav-orbit .nav-btn.active span{display:none;}
+
+    /* ===== مودال هشدار و پروگرس ===== */
+    #custom-alert{display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(15,18,19,.96); border:1px solid var(--line-strong); border-radius:22px; padding:28px; z-index:10000; box-shadow:0 24px 70px rgba(0,0,0,.7); backdrop-filter:blur(32px); -webkit-backdrop-filter:blur(32px); width:90%; max-width:400px; text-align:center;}
+    #custom-alert-text{color:var(--text); font-size:1.05rem; margin:0 0 24px; line-height:1.7;}
+    .btn-alert-close{background:var(--accent); color:var(--on-accent); border:none; padding:12px 32px; border-radius:12px; font-weight:700; cursor:pointer;}
+    #custom-alert-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:9999; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);}
+    #progress-modal{display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(15,18,19,.96); border:1px solid var(--line-strong); border-radius:24px; padding:30px; z-index:10001; box-shadow:0 25px 65px rgba(0,0,0,.85); backdrop-filter:blur(32px); -webkit-backdrop-filter:blur(32px); width:90%; max-width:400px; text-align:center;}
+    #progress-title{color:var(--accent); margin:0 0 15px;}
+    #progress-text{color:var(--text-dim); font-size:.95rem; margin:0 0 24px; line-height:1.6;}
+    #progress-bar-fill{width:0%; height:100%; background:linear-gradient(90deg,var(--accent),var(--cyan)); border-radius:6px; transition:width .15s ease;}
+    #progress-percent{font-family:var(--font-mono); font-weight:700; color:var(--accent); font-size:1.25rem;}
+    .progress-track{width:100%; background:rgba(255,255,255,.05); height:12px; border-radius:6px; overflow:hidden; border:1px solid var(--line-strong); margin-bottom:15px;}
+
+    hr{border:none; border-top:1px solid var(--line); margin:22px 0;}
+
+    /* ===== سایه‌های نئومورف (سبک rivets-neu مطابق گالری) ===== */
+    .scenario-card, .time-box{box-shadow:4px 4px 10px rgba(0,0,0,.45), -3px -3px 8px rgba(255,255,255,.03);}
+    .icon-btn, .field input{box-shadow:3px 3px 7px rgba(0,0,0,.45), -2px -2px 6px rgba(255,255,255,.03);}
+    .manual-btn, .save-btn, .wifi-btn{box-shadow:4px 4px 10px rgba(0,0,0,.45), -3px -3px 8px rgba(255,255,255,.04);}
+
+    @media (max-width:480px){
+      .phone{border-left:none; border-right:none;}
+    }
+  </style>
+  <style>
+    #api-modal{display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(15,18,19,.96); border:1px solid var(--line-strong); border-radius:22px; padding:24px; z-index:10002; box-shadow:0 24px 70px rgba(0,0,0,.7); backdrop-filter:blur(32px); -webkit-backdrop-filter:blur(32px); width:90%; max-width:400px; text-align:right;}
+    #api-modal h3{margin:0 0 12px;color:var(--accent);font-size:1rem;}
+    #api-modal p{margin:0 0 14px;color:var(--text-dim);font-size:.78rem;line-height:1.8;}
+    #api-modal input{width:100%; padding:12px 13px; border-radius:9px; border:1px solid var(--line-strong); background:var(--panel-2); color:var(--text); font-family:var(--font-mono); font-size:.86rem; direction:ltr; text-align:left; margin-bottom:12px;}
+    .api-modal-actions{display:flex;gap:8px;}
+    .api-modal-actions button{flex:1;padding:12px;border-radius:12px;border:none;font-family:var(--font-fa);font-weight:800;}
+    .api-save{background:var(--accent);color:var(--on-accent);}
+    .api-cancel{background:var(--panel-2);color:var(--text-dim);border:1px solid var(--line-strong)!important;}
+    .reset-stats-card{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+    .reset-stats-icon{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--off-dim);border:1px solid var(--off);color:var(--off);box-shadow:0 0 18px rgba(255,84,104,.10);flex-shrink:0;}
+    .reset-stats-icon svg{width:24px;height:24px;}
+    .reset-stats-text{flex:1;min-width:0;}
+    .reset-stats-title{font-weight:800;font-size:.9rem;color:var(--text);margin-bottom:4px;}
+    .reset-stats-sub{font-size:.74rem;color:var(--text-dim);line-height:1.8;}
+    .reset-stats-btn{width:100%;padding:14px;border-radius:var(--btn-radius);border:1px solid var(--off);background:var(--off-dim);color:var(--off);font-family:var(--font-fa);font-weight:900;font-size:.92rem;cursor:pointer;box-shadow:4px 4px 10px rgba(0,0,0,.45), -3px -3px 8px rgba(255,255,255,.04);}
+    .factory-reset-icon{background:rgba(242,169,59,.14);border-color:var(--warn);color:var(--warn);}
+    .factory-reset-btn{border-color:var(--warn);background:var(--warn-dim);color:var(--warn);}
+    .time-box input.error-conflict{color:var(--off)!important;text-shadow:0 0 8px var(--off-dim);}
+    #custom-confirm{display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(15,18,19,.96); border:1px solid var(--line-strong); border-radius:22px; padding:28px; z-index:10004; box-shadow:0 24px 70px rgba(0,0,0,.7); backdrop-filter:blur(32px); -webkit-backdrop-filter:blur(32px); width:90%; max-width:400px; text-align:center;}
+#custom-confirm-text{color:var(--text); font-size:1.05rem; margin:0 0 24px; line-height:1.7;}
+#connection-status{white-space:nowrap;max-width:52vw;overflow:hidden;text-overflow:ellipsis;}
+  </style>
+</head>
+<body>
+
+  <div id="custom-alert-overlay"></div>
+  <div id="custom-alert">
+    <p id="custom-alert-text"></p>
+    <button class="btn-alert-close" onclick="closeAlert()">تایید</button>
+  </div>
+
+  <div id="time-picker-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(15,18,19,.97);border:1px solid var(--line-strong);border-radius:22px;padding:22px 18px;z-index:10005;box-shadow:0 24px 70px rgba(0,0,0,.7);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);width:92%;max-width:340px;text-align:center;">
+    <h3 id="tp-title" style="margin:0 0 14px;color:var(--accent);font-size:.92rem;">تنظیم ساعت</h3>
+    <div class="wheel-wrap">
+      <div class="wheel-col" id="tp-h-col"><div class="wheel-band"></div><div class="wheel-inner" id="tp-h-inner"></div></div>
+      <div class="wheel-sep">:</div>
+      <div class="wheel-col" id="tp-m-col"><div class="wheel-band"></div><div class="wheel-inner" id="tp-m-inner"></div></div>
+    </div>
+    <div class="wheel-labels"><span>ساعت</span><span>دقیقه</span></div>
+    <div class="wheel-actions">
+      <button class="wheel-ok" onclick="confirmTimePicker()">تایید</button>
+      <button class="wheel-cancel" onclick="closeTimePicker()">انصراف</button>
+    </div>
+  </div>
+
+  <div id="custom-confirm">
+    <p id="custom-confirm-text"></p>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button id="custom-confirm-yes" class="btn-alert-close" style="min-width:100px;">تایید</button>
+      <button id="custom-confirm-no" onclick="closeConfirm(false)" style="min-width:100px;background:var(--panel-2);color:var(--text-dim);border:1px solid var(--line-strong);padding:12px 32px;border-radius:12px;font-weight:700;cursor:pointer;font-family:var(--font-fa);">انصراف</button>
+    </div>
+  </div>
+
+  <div id="api-modal">
+    <h3>آدرس اتصال به ESP32</h3>
+    <p>برای جلوگیری از تغییر اشتباه، آدرس فقط از این پنجره تغییر می‌کند. حالت AP معمولاً <span style="direction:ltr;display:inline-block;font-family:var(--font-mono);color:var(--cyan);">http://192.168.4.1</span> است.</p>
+    <input id="api-base-input" value="http://192.168.4.1" inputmode="url" autocomplete="off">
+    <p style="margin-top:4px;">تنظیم اتصال خودکار WiFi برد:</p>
+    <input id="wifi-assist-ssid" value="ESP32_Timer_Hub" inputmode="text" autocomplete="off" placeholder="SSID برد">
+    <input id="wifi-assist-pass" value="12345678" inputmode="text" autocomplete="off" placeholder="رمز وای‌فای برد">
+    <button class="api-save" style="width:100%;margin-bottom:10px;padding:12px;border-radius:12px;border:none;font-family:var(--font-fa);font-weight:800;" onclick="saveWifiAssistFromModal()">ذخیره و اجازه اتصال خودکار</button>
+    <div class="api-modal-actions">
